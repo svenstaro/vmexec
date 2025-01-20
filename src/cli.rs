@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use clap::{Args, Parser, ValueEnum};
 
@@ -51,6 +51,14 @@ fn parse_existing_pathbuf(src: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Parse a string into a Duration
+fn parse_seconds_to_duration(src: &str) -> Result<Duration, String> {
+    let sec_int = src
+        .parse()
+        .map_err(|_e| format!("Failed to parse '{src}' as an integer"))?;
+    Ok(Duration::from_secs(sec_int))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BindMount {
     pub source: PathBuf,
@@ -81,8 +89,19 @@ pub struct Cli {
     #[arg(short, long, value_parser(parse_existing_pathbuf))]
     pub tmpdir: Option<PathBuf>,
 
+    /// SSH connection timeout
+    ///
+    /// Try for this long (in seconds) to connect to the VMs SSH server.
+    #[arg(
+        short,
+        long,
+        default_value = "300",
+        value_parser(parse_seconds_to_duration)
+    )]
+    pub ssh_timeout: Duration,
+
     /// Arguments to run in the virtual machine
-    pub arg: Vec<String>,
+    pub args: Vec<String>,
 
     /// Generate completion file for a shell
     #[arg(long = "print-completions", value_name = "shell")]
