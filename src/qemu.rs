@@ -3,13 +3,14 @@ use std::{
     process::Stdio,
 };
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use base64ct::Encoding;
 use rustix::{fs::IFlags, io::Errno, path::Arg};
 use tokio::{
     fs::{self, File},
     process::Command,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
 /// Get the full command that would be run
@@ -25,6 +26,7 @@ pub fn full_cmd(cmd: &Command) -> String {
 }
 
 /// Create an overlay image based on a source image
+#[tracing::instrument]
 pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<PathBuf> {
     let overlay_image = tmpdir.join("overlay.qcow2");
 
@@ -66,7 +68,14 @@ pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<
 
 /// Launch QEMU
 #[tracing::instrument(skip(ssh_pubkey))]
-pub async fn launch_qemu(tmpdir: &Path, overlay_image: &Path, ssh_pubkey: String) -> Result<()> {
+pub async fn launch_qemu(
+    qemu_cancellation_token: CancellationToken,
+    ssh_cancellation_token: CancellationToken,
+    tmpdir: &Path,
+    overlay_image: &Path,
+    show_vm_window: bool,
+    ssh_pubkey: String,
+) -> Result<()> {
     let ovmf_vars = tmpdir.join("OVMF_VARS.4m.fd");
     fs::copy("/usr/share/edk2/x64/OVMF_VARS.4m.fd", &ovmf_vars).await?;
 
@@ -86,7 +95,6 @@ pub async fn launch_qemu(tmpdir: &Path, overlay_image: &Path, ssh_pubkey: String
     let mut qemu_cmd = Command::new("qemu-system-x86_64");
     qemu_cmd
         .arg("-enable-kvm")
-        .arg("-nographic")
         .args(["-m", &format!("{memory}G")])
         .args(["-cpu", "host"])
         .args(["-smp", &logical_core_count.to_string()])
@@ -108,6 +116,10 @@ pub async fn launch_qemu(tmpdir: &Path, overlay_image: &Path, ssh_pubkey: String
             ),
         ]);
 
+    if !show_vm_window {
+        qemu_cmd.arg("-nographic");
+    }
+
     let qemu_cmd_str = full_cmd(&qemu_cmd);
     debug!("Running: {qemu_cmd_str}");
 
@@ -115,15 +127,32 @@ pub async fn launch_qemu(tmpdir: &Path, overlay_image: &Path, ssh_pubkey: String
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()?;
 
-    let qemu_output = qemu_child.wait_with_output().await?;
+    let qemu_output = tokio::select! {
+        _ = qemu_cancellation_token.cancelled() => {
+            dbg!("lol");
+            bail!("Task was cancelled")
+        }
+        val = qemu_child.wait_with_output() => {
+            dbg!("what");
+            val?
+        }
+        else => {
+            dbg!("lolol");
+            bail!("rofl")
+        }
+    };
+
     if !qemu_output.status.success() {
         error!(
             "qemu failed: {}",
             String::from_utf8_lossy(&qemu_output.stderr)
         );
+        ssh_cancellation_token.cancel();
     }
+    dbg!("at the end");
 
     Ok(())
 }

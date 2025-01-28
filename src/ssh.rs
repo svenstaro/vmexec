@@ -15,6 +15,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::ToSocketAddrs,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
 #[derive(Clone, Debug)]
@@ -82,7 +83,7 @@ pub struct Session {
 }
 
 impl Session {
-    #[tracing::instrument]
+    #[tracing::instrument(skip(privkey))]
     async fn connect<T: ToSocketAddrs + Debug + Clone>(
         privkey: PrivateKey,
         addrs: T,
@@ -97,7 +98,7 @@ impl Session {
         let sh = SshClient {};
 
         let now = Instant::now();
-        dbg!("Before connect");
+        debug!("Connecting to SSH");
 
         let mut session = loop {
             match russh::client::connect(config.clone(), addrs.clone(), sh.clone()).await {
@@ -120,7 +121,7 @@ impl Session {
                 }
             }
         };
-        dbg!("After connect");
+        debug!("Authenticating via SSH");
 
         // use publickey authentication
         let auth_res = session
@@ -208,7 +209,10 @@ impl Session {
 }
 
 /// Connect SSH
+#[tracing::instrument(skip(ssh_privkey))]
 pub async fn connect_ssh(
+    qemu_cancellation_token: CancellationToken,
+    ssh_cancellation_token: CancellationToken,
     ssh_privkey: String,
     ssh_timeout: Duration,
     args: Vec<String>,
@@ -223,17 +227,26 @@ pub async fn connect_ssh(
         // We're using `termion` to put the terminal into raw mode, so that we can
         // display the output of interactive applications correctly
         let _raw_term = std::io::stdout().into_raw_mode()?;
-        ssh.call(
-            &args
-                .into_iter()
-                .map(|x| shell_escape::escape(x.into())) // arguments are escaped manually since the SSH protocol doesn't support quoting
-                .collect::<Vec<_>>()
-                .join(" "),
-        )
-        .await?
+
+        let escaped_args = &args
+            .into_iter()
+            .map(|x| shell_escape::escape(x.into())) // arguments are escaped manually since the SSH protocol doesn't support quoting
+            .collect::<Vec<_>>()
+            .join(" ");
+        let ssh_output = tokio::select! {
+            _ = ssh_cancellation_token.cancelled() => {
+                bail!("Task was cancelled")
+            }
+            val = ssh.call(escaped_args) => {
+                val
+            }
+        };
+        qemu_cancellation_token.cancel();
+        ssh_output?
     };
 
     println!("Exitcode: {:?}", code);
+    qemu_cancellation_token.cancel();
     ssh.close().await?;
     Ok(())
 }

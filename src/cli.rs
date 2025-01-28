@@ -95,10 +95,16 @@ pub struct Cli {
     #[arg(
         short,
         long,
-        default_value = "300",
+        default_value = "20",
         value_parser(parse_seconds_to_duration)
     )]
     pub ssh_timeout: Duration,
+
+    /// Show a window with the virtual machine running in it.
+    ///
+    /// This is mostly useful for debugging boot failures.
+    #[arg(long)]
+    pub show_vm_window: bool,
 
     /// Arguments to run in the virtual machine
     pub args: Vec<String>,

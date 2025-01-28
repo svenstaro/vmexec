@@ -1,7 +1,11 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use clap::{crate_name, CommandFactory, Parser};
 use qemu::launch_qemu;
 use ssh::connect_ssh;
+use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 mod cli;
@@ -55,17 +59,43 @@ async fn main() -> Result<()> {
     debug!("SSH command for manual debugging:");
     debug!("ssh root@localhost -p 2222 -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
 
-    let qemu_handle = tokio::spawn(async move {
-        launch_qemu(&tmpdir.path(), &overlay_image, ssh_keypair.pubkey_str).await
+    let qemu_cancellation_token = CancellationToken::new();
+    let ssh_cancellation_token = CancellationToken::new();
+
+    let qemu_task = tokio::spawn({
+        let qemu_cancellation_token_ = qemu_cancellation_token.clone();
+        let ssh_cancellation_token_ = ssh_cancellation_token.clone();
+        async move {
+            launch_qemu(
+                qemu_cancellation_token_,
+                ssh_cancellation_token_,
+                &tmpdir.path(),
+                &overlay_image,
+                cli.show_vm_window,
+                ssh_keypair.pubkey_str,
+            )
+            .await
+        }
     });
-    let ssh_client = tokio::spawn(async move {
-        connect_ssh(ssh_keypair.privkey_str, cli.ssh_timeout, cli.args).await
+    let ssh_task = tokio::spawn({
+        let qemu_cancellation_token_ = qemu_cancellation_token.clone();
+        let ssh_cancellation_token_ = ssh_cancellation_token.clone();
+        async move {
+            connect_ssh(
+                qemu_cancellation_token_,
+                ssh_cancellation_token_,
+                ssh_keypair.privkey_str,
+                cli.ssh_timeout,
+                cli.args,
+            )
+            .await
+        }
     });
 
-    tokio::select! {
-        val = qemu_handle => dbg!("qemu", val),
-        val = ssh_client => dbg!("ssh", val),
-    };
+    // If we get here, we're probably done with SSH as the VM is running forever.
+    // As such, we'll need to try to clean up the VM here.
+    let _ = tokio::join!(qemu_task, ssh_task);
+    dbg!("finished running");
 
     Ok(())
 }
