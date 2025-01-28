@@ -1,10 +1,7 @@
-use std::time::Duration;
-
 use anyhow::Result;
 use clap::{crate_name, CommandFactory, Parser};
 use qemu::launch_qemu;
 use ssh::connect_ssh;
-use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 

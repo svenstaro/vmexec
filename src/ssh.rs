@@ -156,8 +156,8 @@ impl Session {
         channel.exec(true, command).await?;
 
         let code;
-        let mut stdin = tokio::io::stdin();
-        let mut stdout = tokio::io::stdout();
+        let mut stdin = tokio_fd::AsyncFd::try_from(libc::STDIN_FILENO).unwrap();
+        let mut stdout = tokio_fd::AsyncFd::try_from(libc::STDOUT_FILENO).unwrap();
         let mut buf = vec![0; 1024];
         let mut stdin_closed = false;
 
