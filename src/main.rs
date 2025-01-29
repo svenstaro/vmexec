@@ -1,3 +1,6 @@
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use clap::{crate_name, CommandFactory, Parser};
 use tokio_util::sync::CancellationToken;
@@ -9,6 +12,27 @@ mod ssh;
 
 use crate::qemu::{create_overlay_image, launch_qemu};
 use crate::ssh::{connect_ssh, create_ssh_key};
+
+/// Either an explicit directory for temporary files or a generated tempdir
+///
+/// The reason this is required and that we can't just create a `TempDir` and cast it to `PathBuf`
+/// using `TempDir.into_path()` as that will cause it to no longer clean up after itself.
+#[derive(Debug)]
+enum DefaultOrExplicitTempDir {
+    DefaultTempDir(tempfile::TempDir),
+    ExplicitTempDir(PathBuf),
+}
+
+impl Deref for DefaultOrExplicitTempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        match &self {
+            DefaultOrExplicitTempDir::DefaultTempDir(tmpdir) => tmpdir.path(),
+            DefaultOrExplicitTempDir::ExplicitTempDir(tmpdir) => tmpdir.as_path(),
+        }
+    }
+}
 
 #[tokio::main]
 #[instrument]
@@ -64,14 +88,14 @@ async fn main() -> Result<()> {
         unreachable!();
     };
 
-    let tmpdir = tempfile::tempdir()?;
+    let tmpdir = if let Some(tmpdir) = cli.tmpdir {
+        DefaultOrExplicitTempDir::ExplicitTempDir(tmpdir)
+    } else {
+        DefaultOrExplicitTempDir::DefaultTempDir(tempfile::tempdir()?)
+    };
 
-    if cli.tmpdir.is_some() {
-        unimplemented!("Meh");
-    }
-
-    let ssh_keypair = create_ssh_key(tmpdir.path()).await?;
-    let overlay_image = create_overlay_image(tmpdir.path(), &image).await?;
+    let ssh_keypair = create_ssh_key(&tmpdir).await?;
+    let overlay_image = create_overlay_image(&tmpdir, &image).await?;
 
     debug!("SSH command for manual debugging:");
     debug!("ssh root@localhost -p 2222 -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
@@ -86,7 +110,7 @@ async fn main() -> Result<()> {
             launch_qemu(
                 qemu_cancellation_token_,
                 ssh_cancellation_token_,
-                tmpdir.path(),
+                &tmpdir,
                 &overlay_image,
                 cli.show_vm_window,
                 ssh_keypair.pubkey_str,
