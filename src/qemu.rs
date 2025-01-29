@@ -3,7 +3,7 @@ use std::{
     process::Stdio,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use base64ct::Encoding;
 use rustix::{fs::IFlags, io::Errno, path::Arg};
 use tokio::{
@@ -11,7 +11,7 @@ use tokio::{
     process::Command,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error};
+use tracing::{debug, error, info, instrument, trace};
 
 /// Get the full command that would be run
 pub fn full_cmd(cmd: &Command) -> String {
@@ -26,12 +26,14 @@ pub fn full_cmd(cmd: &Command) -> String {
 }
 
 /// Create an overlay image based on a source image
-#[tracing::instrument]
+#[instrument]
 pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<PathBuf> {
     let overlay_image = tmpdir.join("overlay.qcow2");
 
     // Touch the file so that it exists.
-    let overlay_image_fd = File::create(&overlay_image).await?;
+    let overlay_image_fd = File::create(&overlay_image)
+        .await
+        .context("Could't create overlay image")?;
 
     // Turn off copy-on-write in case the filesystem supports it.
     // This is useful in case this is using a COW-enabled backing filesystem as it will provide no
@@ -53,11 +55,12 @@ pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<
         .arg(&overlay_image);
 
     let qemu_img_cmd_str = full_cmd(&qemu_img_cmd);
-    debug!("Running: {qemu_img_cmd_str}");
+    info!("Creating overlay image");
+    debug!("{qemu_img_cmd_str}");
 
     let qemu_img_output = qemu_img_cmd.output().await?;
     if !qemu_img_output.status.success() {
-        error!(
+        bail!(
             "qemu-img failed: {}",
             String::from_utf8_lossy(&qemu_img_output.stderr)
         );
@@ -67,7 +70,7 @@ pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<
 }
 
 /// Launch QEMU
-#[tracing::instrument(skip(ssh_pubkey))]
+#[instrument(skip(qemu_cancellation_token, ssh_cancellation_token, ssh_pubkey))]
 pub async fn launch_qemu(
     qemu_cancellation_token: CancellationToken,
     ssh_cancellation_token: CancellationToken,
@@ -121,7 +124,8 @@ pub async fn launch_qemu(
     }
 
     let qemu_cmd_str = full_cmd(&qemu_cmd);
-    debug!("Running: {qemu_cmd_str}");
+    info!("Running QEMU");
+    trace!("{qemu_cmd_str}");
 
     let qemu_child = qemu_cmd
         .stdin(Stdio::piped())
@@ -132,27 +136,22 @@ pub async fn launch_qemu(
 
     let qemu_output = tokio::select! {
         _ = qemu_cancellation_token.cancelled() => {
-            dbg!("lol");
-            bail!("Task was cancelled")
+            debug!("QEMU task was cancelled");
+            return Ok(());
         }
         val = qemu_child.wait_with_output() => {
-            dbg!("what");
+            debug!("QEMU process exited, that's usually a bad sign");
             val?
-        }
-        else => {
-            dbg!("lolol");
-            bail!("rofl")
         }
     };
 
     if !qemu_output.status.success() {
         error!(
-            "qemu failed: {}",
+            "QEMU failed: {}",
             String::from_utf8_lossy(&qemu_output.stderr)
         );
         ssh_cancellation_token.cancel();
     }
-    dbg!("at the end");
 
     Ok(())
 }

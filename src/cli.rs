@@ -1,6 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use clap::{Args, Parser, ValueEnum};
+use tracing::Level;
 
 /// The operating system to run
 #[derive(Debug, Clone, ValueEnum)]
@@ -69,8 +70,9 @@ pub struct BindMount {
 #[derive(Debug, Clone, Parser)]
 #[command(name = "vmexec", author, about, version)]
 pub struct Cli {
-    #[arg(long)]
-    pub verbose: bool,
+    /// Log messages above specified level (error, warn, info, debug, trace)
+    #[arg(long, default_value = "warn")]
+    pub log_level: Level,
 
     #[command(flatten)]
     pub image_source: ImageSource,

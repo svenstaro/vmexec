@@ -16,18 +16,18 @@ use tokio::{
     net::ToSocketAddrs,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::{debug, error, info, instrument};
 
 #[derive(Clone, Debug)]
 pub struct PersistedSshKeypair {
     pub pubkey_str: String,
-    pub pubkey_path: PathBuf,
+    pub _pubkey_path: PathBuf,
     pub privkey_str: String,
     pub privkey_path: PathBuf,
 }
 
 /// Create SSH key to be used with the virtual machine
-#[tracing::instrument]
+#[instrument]
 pub async fn create_ssh_key(tmpdir: &Path) -> Result<PersistedSshKeypair> {
     let privkey_path = tmpdir.join("id_ed25519");
     let pubkey_path = privkey_path.with_extension("pub");
@@ -50,7 +50,7 @@ pub async fn create_ssh_key(tmpdir: &Path) -> Result<PersistedSshKeypair> {
 
     let keypair = PersistedSshKeypair {
         pubkey_str: pubkey_openssh,
-        pubkey_path,
+        _pubkey_path: pubkey_path,
         privkey_str: privkey_openssh,
         privkey_path,
     };
@@ -67,6 +67,7 @@ struct SshClient {}
 impl russh::client::Handler for SshClient {
     type Error = russh::Error;
 
+    #[instrument]
     async fn check_server_key(
         &mut self,
         _server_public_key: &ssh_key::PublicKey,
@@ -83,7 +84,7 @@ pub struct Session {
 }
 
 impl Session {
-    #[tracing::instrument(skip(privkey))]
+    #[instrument(skip(privkey))]
     async fn connect<T: ToSocketAddrs + Debug + Clone>(
         privkey: PrivateKey,
         addrs: T,
@@ -103,21 +104,31 @@ impl Session {
         let mut session = loop {
             match russh::client::connect(config.clone(), addrs.clone(), sh.clone()).await {
                 Ok(x) => break x,
-                Err(russh::Error::IO(ref e)) => match e.kind() {
-                    // The VM is still booting at this point so we're just ignoring these errors
-                    // for some time.
-                    ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset => {
-                        if now.elapsed() > timeout {
-                            dbg!(e);
-                            bail!("Timeout");
+                Err(russh::Error::IO(ref e)) => {
+                    match e.kind() {
+                        // The VM is still booting at this point so we're just ignoring these errors
+                        // for some time.
+                        ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset => {
+                            if now.elapsed() > timeout {
+                                error!("Reached timeout trying to connect to virtual machine via SSH, aborting");
+                                bail!("Timeout");
+                            }
+                        }
+                        e => {
+                            error!("Unhandled error occured: {e}");
+                            bail!("Unknown error");
                         }
                     }
-                    e => panic!("{}", e),
-                },
+                }
+                Err(russh::Error::Disconnect) => {
+                    if now.elapsed() > timeout {
+                        error!("Reached timeout trying to connect to virtual machine via SSH, aborting");
+                        bail!("Timeout");
+                    }
+                }
                 Err(e) => {
-                    continue;
-                    dbg!(e);
-                    bail!("somethings fcuked");
+                    error!("Unhandled error occured: {e}");
+                    bail!("Unknown error");
                 }
             }
         };
@@ -129,12 +140,13 @@ impl Session {
             .await?;
 
         if !auth_res {
-            anyhow::bail!("Authentication (with publickey) failed");
+            bail!("Authentication (with publickey) failed");
         }
 
         Ok(Self { session })
     }
 
+    #[instrument(skip(self))]
     async fn call(&mut self, command: &str) -> Result<u32> {
         let mut channel = self.session.channel_open_session().await?;
 
@@ -156,8 +168,8 @@ impl Session {
         channel.exec(true, command).await?;
 
         let code;
-        let mut stdin = tokio_fd::AsyncFd::try_from(libc::STDIN_FILENO).unwrap();
-        let mut stdout = tokio_fd::AsyncFd::try_from(libc::STDOUT_FILENO).unwrap();
+        let mut stdin = tokio_fd::AsyncFd::try_from(libc::STDIN_FILENO)?;
+        let mut stdout = tokio_fd::AsyncFd::try_from(libc::STDOUT_FILENO)?;
         let mut buf = vec![0; 1024];
         let mut stdin_closed = false;
 
@@ -200,6 +212,7 @@ impl Session {
         Ok(code)
     }
 
+    #[instrument(skip(self))]
     async fn close(&mut self) -> Result<()> {
         self.session
             .disconnect(Disconnect::ByApplication, "", "English")
@@ -209,7 +222,7 @@ impl Session {
 }
 
 /// Connect SSH
-#[tracing::instrument(skip(ssh_privkey))]
+#[instrument(skip(qemu_cancellation_token, ssh_cancellation_token, ssh_privkey))]
 pub async fn connect_ssh(
     qemu_cancellation_token: CancellationToken,
     ssh_cancellation_token: CancellationToken,
@@ -220,7 +233,11 @@ pub async fn connect_ssh(
     let privkey = PrivateKey::from_openssh(ssh_privkey)?;
 
     // Session is a wrapper around a russh client, defined down below
-    let mut ssh = Session::connect(privkey, ("localhost", 2222), ssh_timeout).await?;
+    let mut ssh = Session::connect(privkey, ("localhost", 2222), ssh_timeout)
+        .await
+        .inspect_err(|_| {
+            qemu_cancellation_token.cancel();
+        })?;
     info!("Connected");
 
     let code = {
@@ -235,7 +252,8 @@ pub async fn connect_ssh(
             .join(" ");
         let ssh_output = tokio::select! {
             _ = ssh_cancellation_token.cancelled() => {
-                bail!("Task was cancelled")
+                debug!("SSH task was cancelled");
+                return Ok(())
             }
             val = ssh.call(escaped_args) => {
                 val
