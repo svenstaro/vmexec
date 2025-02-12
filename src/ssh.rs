@@ -4,10 +4,11 @@ use std::path::PathBuf;
 use std::{env, os::unix::fs::PermissionsExt, path::Path, sync::Arc, time::Duration};
 
 use anyhow::{bail, Result};
-use async_trait::async_trait;
+use base64ct::LineEnding;
+use russh::keys::ssh_key::private::Ed25519Keypair;
+use russh::keys::ssh_key::rand_core::OsRng;
+use russh::keys::{PrivateKey, PublicKey};
 use russh::{keys::key::PrivateKeyWithHashAlg, ChannelMsg, Disconnect};
-use ssh_key::private::Ed25519Keypair;
-use ssh_key::PrivateKey;
 use termion::raw::IntoRawMode;
 use tokio::time::Instant;
 use tokio::{
@@ -32,14 +33,14 @@ pub async fn create_ssh_key(tmpdir: &Path) -> Result<PersistedSshKeypair> {
     let privkey_path = tmpdir.join("id_ed25519");
     let pubkey_path = privkey_path.with_extension("pub");
 
-    let ed25519_keypair = Ed25519Keypair::random(&mut ssh_key::rand_core::OsRng);
+    let ed25519_keypair = Ed25519Keypair::random(&mut OsRng);
 
-    let pubkey_openssh = ssh_key::PublicKey::from(ed25519_keypair.public).to_openssh()?;
+    let pubkey_openssh = PublicKey::from(ed25519_keypair.public).to_openssh()?;
     debug!("Writing SSH public key to {pubkey_path:?}");
     fs::write(&pubkey_path, &pubkey_openssh).await?;
 
-    let privkey_openssh = ssh_key::PrivateKey::from(ed25519_keypair)
-        .to_openssh(ssh_key::LineEnding::default())?
+    let privkey_openssh = PrivateKey::from(ed25519_keypair)
+        .to_openssh(LineEnding::default())?
         .to_string();
     debug!("Writing SSH private key to {privkey_path:?}");
 
@@ -63,14 +64,13 @@ struct SshClient {}
 // More SSH event handlers
 // can be defined in this trait
 // In this example, we're only using Channel, so these aren't needed.
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = russh::Error;
 
     #[instrument]
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        _server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -136,10 +136,10 @@ impl Session {
 
         // use publickey authentication
         let auth_res = session
-            .authenticate_publickey("root", PrivateKeyWithHashAlg::new(Arc::new(privkey), None)?)
+            .authenticate_publickey("root", PrivateKeyWithHashAlg::new(Arc::new(privkey), None))
             .await?;
 
-        if !auth_res {
+        if !auth_res.success() {
             bail!("Authentication (with publickey) failed");
         }
 

@@ -1,45 +1,20 @@
-use std::ops::Deref;
-use std::path::{Path, PathBuf};
-
 use anyhow::Result;
 use clap::{crate_name, CommandFactory, Parser};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, Level};
 
 mod cli;
 mod qemu;
 mod ssh;
+mod vm_images;
 
+use crate::cli::DefaultOrExplicitTempDir;
 use crate::qemu::{create_overlay_image, launch_qemu};
 use crate::ssh::{connect_ssh, create_ssh_key};
+use crate::vm_images::download_archlinux;
 
-/// Either an explicit directory for temporary files or a generated tempdir
-///
-/// The reason this is required and that we can't just create a `TempDir` and cast it to `PathBuf`
-/// using `TempDir.into_path()` as that will cause it to no longer clean up after itself.
-#[derive(Debug)]
-enum DefaultOrExplicitTempDir {
-    DefaultTempDir(tempfile::TempDir),
-    ExplicitTempDir(PathBuf),
-}
-
-impl Deref for DefaultOrExplicitTempDir {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        match &self {
-            DefaultOrExplicitTempDir::DefaultTempDir(tmpdir) => tmpdir.path(),
-            DefaultOrExplicitTempDir::ExplicitTempDir(tmpdir) => tmpdir.as_path(),
-        }
-    }
-}
-
-#[tokio::main]
-#[instrument]
-async fn main() -> Result<()> {
-    let cli = cli::Cli::parse();
-
-    match cli.log_level {
+fn setup_tracing(log_level: Level) -> Result<()> {
+    match log_level {
         tracing::Level::TRACE => tracing_subscriber::fmt()
             .pretty()
             .with_env_filter(format!("{}=trace", crate_name!()))
@@ -66,6 +41,16 @@ async fn main() -> Result<()> {
             .init(),
     };
 
+    Ok(())
+}
+
+#[tokio::main]
+#[instrument]
+async fn main() -> Result<()> {
+    let cli = cli::Cli::parse();
+
+    setup_tracing(cli.log_level)?;
+
     if let Some(shell) = cli.print_completions {
         let mut clap_app = cli::Cli::command();
         let app_name = clap_app.get_name().to_string();
@@ -80,18 +65,23 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let image = if let Some(_os) = cli.image_source.os {
-        unimplemented!("Handle this");
-    } else if let Some(image) = cli.image_source.image {
-        image
-    } else {
-        unreachable!();
-    };
-
     let tmpdir = if let Some(tmpdir) = cli.tmpdir {
         DefaultOrExplicitTempDir::ExplicitTempDir(tmpdir)
     } else {
         DefaultOrExplicitTempDir::DefaultTempDir(tempfile::tempdir()?)
+    };
+
+    let image = if let Some(os) = cli.image_source.os {
+        match os {
+            cli::OsType::Archlinux => {
+                download_archlinux(&tmpdir).await?;
+                std::path::PathBuf::new()
+            }
+        }
+    } else if let Some(image) = cli.image_source.image {
+        image
+    } else {
+        unreachable!();
     };
 
     let ssh_keypair = create_ssh_key(&tmpdir).await?;

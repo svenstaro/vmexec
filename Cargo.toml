@@ -10,16 +10,17 @@ strip = true
 
 [dependencies]
 anyhow = { version = "1.0.95", features = ["backtrace"] }
-async-trait = "0.1.85"
 base64ct = { version = "1.6.0", features = ["std", "alloc"] }
 clap = { version = "4.5", features = ["wrap_help", "derive", "cargo"] }
 clap_complete = "4.5.40"
 clap_mangen = "0.2.24"
+indicatif = "0.17.11"
 libc = { version = "0.2.169", default-features = false }
-russh = "0.49.2"
+rattler_digest = { version = "1.0.5", features = ["tokio"] }
+reqwest = "0.12.12"
+russh = "0.50"
 rustix = { version = "0.38.42", features = ["fs"] }
 shell-escape = "0.1.5"
-ssh-key = { version = "0.6.7", features = ["ed25519", "getrandom"] }
 sysinfo = "0.33.0"
 tempfile = "3.14.0"
 termion = "4.0.3"
@@ -28,6 +29,7 @@ tokio-fd = "0.3.0"
 tokio-util = "0.7.13"
 tracing = { version = "0.1.41", features = ["log"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "local-time"] }
+url = "2.5.4"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

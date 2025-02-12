@@ -1,7 +1,32 @@
-use std::{path::PathBuf, time::Duration};
+use std::{
+    ops::Deref,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use clap::{Args, Parser, ValueEnum};
 use tracing::Level;
+
+/// Either an explicit directory for temporary files or a generated tempdir
+///
+/// The reason this is required and that we can't just create a `TempDir` and cast it to `PathBuf`
+/// using `TempDir.into_path()` as that will cause it to no longer clean up after itself.
+#[derive(Debug)]
+pub enum DefaultOrExplicitTempDir {
+    DefaultTempDir(tempfile::TempDir),
+    ExplicitTempDir(PathBuf),
+}
+
+impl Deref for DefaultOrExplicitTempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        match &self {
+            DefaultOrExplicitTempDir::DefaultTempDir(tmpdir) => tmpdir.path(),
+            DefaultOrExplicitTempDir::ExplicitTempDir(tmpdir) => tmpdir.as_path(),
+        }
+    }
+}
 
 /// The operating system to run
 #[derive(Debug, Clone, ValueEnum)]
