@@ -3,8 +3,8 @@ use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::{env, os::unix::fs::PermissionsExt, path::Path, sync::Arc, time::Duration};
 
-use anyhow::{bail, Result};
 use base64ct::LineEnding;
+use color_eyre::eyre::{bail, Result};
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::keys::{PrivateKey, PublicKey};
@@ -29,8 +29,8 @@ pub struct PersistedSshKeypair {
 
 /// Create SSH key to be used with the virtual machine
 #[instrument]
-pub async fn create_ssh_key(tmpdir: &Path) -> Result<PersistedSshKeypair> {
-    let privkey_path = tmpdir.join("id_ed25519");
+pub async fn create_ssh_key(dir: &Path) -> Result<PersistedSshKeypair> {
+    let privkey_path = dir.join("id_ed25519");
     let pubkey_path = privkey_path.with_extension("pub");
 
     let ed25519_keypair = Ed25519Keypair::random(&mut OsRng);

@@ -1,6 +1,6 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use color_eyre::eyre::{bail, Context, OptionExt, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use rattler_digest::{compute_file_digest, Sha256};
 use tokio::{
@@ -12,7 +12,7 @@ use url::Url;
 
 /// Download the most recent Arch Linux image
 #[instrument]
-pub async fn download_archlinux(dir: &Path) -> Result<()> {
+pub async fn download_archlinux(dir: &Path) -> Result<PathBuf> {
     let arch_boxes_base_url = Url::parse(
         "https://gitlab.archlinux.org/archlinux/arch-boxes/-/jobs/artifacts/master/raw/",
     )?;
@@ -27,37 +27,57 @@ pub async fn download_archlinux(dir: &Path) -> Result<()> {
     let build_version_line = build_version
         .lines()
         .next()
-        .context("No line break in output")?;
-    let build_version = build_version_line.split('=').next_back().context(format!(
-        "BUILD_VERSION line not in expected format: {build_version_line}"
-    ))?;
+        .ok_or_eyre("No line break in output")?;
+    let build_version = build_version_line
+        .split('=')
+        .next_back()
+        .ok_or_eyre(format!(
+            "BUILD_VERSION line not in expected format: {build_version_line}"
+        ))?;
 
     let image_name = format!("Arch-Linux-x86_64-libvirt-executor-{build_version}.qcow2");
 
     // The file will be downloaded to this path.
     let local_image_path = dir.join(&image_name);
-    let local_image_checksum_path = local_image_path.join(".SHA256");
+
+    let image_ext = local_image_path
+        .extension()
+        .ok_or_eyre("Somehow the image '{local_image_path:?}' didn't have a file extension")?
+        .to_str()
+        .ok_or_eyre("File extension in '{image_ext}' isn't ASCII")?;
+    let local_image_checksum_path = local_image_path.with_extension(format!("{image_ext}.SHA256"));
+
+    // First check if the files even need downloading or whether we already have them.
+    if local_image_path.exists() && local_image_checksum_path.exists() {
+        debug!("Found pre-existing files for image, skipping download");
+        return Ok(local_image_path);
+    } else {
+        debug!("Didn't find requested image locally, proceeding to download");
+    }
 
     let image_url = arch_boxes_base_url.join(&format!("output/{image_name}?job=build:secure"))?;
     let image_checksum_url =
         arch_boxes_base_url.join(&format!("output/{image_name}.SHA256?job=build:secure"))?;
 
-    trace!("Getting Arch Linux image checksum from {image_checksum_url}");
+    trace!("Getting Arch Linux image checksum from '{image_checksum_url}'");
 
-    let image_checksum = reqwest::get(image_checksum_url)
+    let mut image_checksum = reqwest::get(image_checksum_url)
         .await?
         .error_for_status()?
         .bytes()
         .await?;
 
-    dbg!("omg");
-    fs::write(local_image_checksum_path, &image_checksum).await?;
-    dbg!("rofl");
+    fs::write(&local_image_checksum_path, &image_checksum)
+        .await
+        .wrap_err(format!(
+            "Can't write checksum file to '{local_image_checksum_path:?}'"
+        ))?;
 
-    let mut file = OpenOptions::new()
+    let mut local_image_file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
+        .truncate(true)
         .open(&local_image_path)
         .await?;
 
@@ -66,7 +86,7 @@ pub async fn download_archlinux(dir: &Path) -> Result<()> {
     let mut image_resp = reqwest::get(image_url.clone()).await?.error_for_status()?;
     let image_size = image_resp
         .content_length()
-        .context("Couldn't get image size")?;
+        .ok_or_eyre("Couldn't get image size")?;
 
     debug!("Resolved as {} with {} bytes", image_resp.url(), image_size);
 
@@ -79,18 +99,22 @@ pub async fn download_archlinux(dir: &Path) -> Result<()> {
     progress.set_message(format!("Downloading {}", image_resp.url()));
 
     while let Some(chunk) = image_resp.chunk().await? {
-        file.write_all(&chunk).await?;
+        local_image_file.write_all(&chunk).await?;
         progress.inc(chunk.len() as u64);
     }
+    progress.finish_with_message("Download complete!");
 
     info!("Checking file checksum");
 
+    // The hash file we downloaded is in the format "hash filename" so we'll have to cut off the
+    // first part to get just the hash.
+    image_checksum.truncate(64);
+    let image_checksum_raw = hex::decode(image_checksum)?;
+
     let computed_checksum = compute_file_digest::<Sha256>(&local_image_path)?;
-    if *image_checksum != *computed_checksum {
+    if image_checksum_raw != computed_checksum.as_slice() {
         bail!("Checksum mismatch on {local_image_path:?}, maybe the file got corrupted somehow. Try deleting it and retrying.");
     }
 
-    progress.finish_with_message("Download complete!");
-
-    Ok(())
+    Ok(local_image_path)
 }

@@ -3,8 +3,8 @@ use std::{
     process::Stdio,
 };
 
-use anyhow::{bail, Context, Result};
 use base64ct::Encoding;
+use color_eyre::eyre::{bail, Context, Result};
 use rustix::{fs::IFlags, io::Errno, path::Arg};
 use tokio::{
     fs::{self, File},
@@ -33,7 +33,7 @@ pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<
     // Touch the file so that it exists.
     let overlay_image_fd = File::create(&overlay_image)
         .await
-        .context("Could't create overlay image")?;
+        .wrap_err("Could't create overlay image")?;
 
     // Turn off copy-on-write in case the filesystem supports it.
     // This is useful in case this is using a COW-enabled backing filesystem as it will provide no
