@@ -10,9 +10,11 @@ use tokio::{
 use tracing::{debug, info, instrument, trace};
 use url::Url;
 
+use crate::cli::Pull;
+
 /// Download the most recent Arch Linux image
 #[instrument]
-pub async fn download_archlinux(dir: &Path) -> Result<PathBuf> {
+pub async fn download_archlinux(pull: Pull, dir: &Path) -> Result<PathBuf> {
     let arch_boxes_base_url = Url::parse(
         "https://gitlab.archlinux.org/archlinux/arch-boxes/-/jobs/artifacts/master/raw/",
     )?;
@@ -52,7 +54,10 @@ pub async fn download_archlinux(dir: &Path) -> Result<PathBuf> {
         debug!("Found pre-existing files for image, skipping download");
         return Ok(local_image_path);
     } else {
-        debug!("Didn't find requested image locally, proceeding to download");
+        match pull {
+            Pull::Never => bail!("Image not found locally and pull option never chosen"),
+            Pull::Newer => debug!("Didn't find requested image locally, proceeding to download"),
+        }
     }
 
     let image_url = arch_boxes_base_url.join(&format!("output/{image_name}?job=build:secure"))?;

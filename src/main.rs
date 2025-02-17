@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 
     let image = if let Some(os) = cli.image_source.os {
         match os {
-            cli::OsType::Archlinux => download_archlinux(cache_dir).await?,
+            cli::OsType::Archlinux => download_archlinux(cli.pull, cache_dir).await?,
         }
     } else if let Some(image) = cli.image_source.image {
         image

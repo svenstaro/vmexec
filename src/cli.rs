@@ -66,6 +66,12 @@ pub struct BindMount {
     pub dest: PathBuf,
 }
 
+#[derive(Clone, Debug, ValueEnum)]
+pub enum Pull {
+    Never,
+    Newer,
+}
+
 /// Run a command in a new virtual machine
 #[derive(Debug, Clone, Parser)]
 #[command(name = "vmexec", author, about, version)]
@@ -96,11 +102,15 @@ pub struct Cli {
     )]
     pub ssh_timeout: Duration,
 
-    /// Show a window with the virtual machine running in it.
+    /// Show a window with the virtual machine running in it
     ///
     /// This is mostly useful for debugging boot failures.
     #[arg(long)]
     pub show_vm_window: bool,
+
+    /// When to pull a new image
+    #[arg(long, default_value = "newer")]
+    pub pull: Pull,
 
     /// Arguments to run in the virtual machine
     pub args: Vec<String>,
