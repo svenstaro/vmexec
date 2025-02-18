@@ -27,8 +27,8 @@ pub fn full_cmd(cmd: &Command) -> String {
 
 /// Create an overlay image based on a source image
 #[instrument]
-pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<PathBuf> {
-    let overlay_image = tmpdir.join("overlay.qcow2");
+pub async fn create_overlay_image(run_data_dir: &Path, source_image: &Path) -> Result<PathBuf> {
+    let overlay_image = run_data_dir.join("overlay.qcow2");
 
     // Touch the file so that it exists.
     let overlay_image_fd = File::create(&overlay_image)
@@ -78,12 +78,12 @@ pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<
 pub async fn launch_qemu(
     qemu_cancellation_token: CancellationToken,
     ssh_cancellation_token: CancellationToken,
-    tmpdir: &Path,
+    run_data_dir: &Path,
     overlay_image: &Path,
     show_vm_window: bool,
     ssh_pubkey: String,
 ) -> Result<()> {
-    let ovmf_vars = tmpdir.join("OVMF_VARS.4m.fd");
+    let ovmf_vars = run_data_dir.join("OVMF_VARS.4m.fd");
     fs::copy("/usr/share/edk2/x64/OVMF_VARS.4m.fd", &ovmf_vars).await?;
 
     let overlay_image_str = overlay_image.to_string_lossy();
@@ -120,7 +120,7 @@ pub async fn launch_qemu(
         .args(["-chardev", "socket,id=char0,path=/tmp/lol.sock"])
         .args(["-device", "vhost-user-fs-pci,chardev=char0,tag=myfs"])
 
-        // EFI bios
+        // UEFI
         .args([
             "-drive",
             "if=pflash,format=raw,unit=0,file=/usr/share/edk2/x64/OVMF.4m.fd,readonly=on",
