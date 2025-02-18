@@ -101,7 +101,7 @@ pub async fn launch_qemu(
 
     let mut qemu_cmd = Command::new("qemu-system-x86_64");
     qemu_cmd
-        .args(["accel", "kvm"])
+        .args(["-accel", "kvm"])
         .args(["-cpu", "host"])
         .args(["-smp", &logical_core_count.to_string()])
 
