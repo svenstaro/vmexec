@@ -123,7 +123,7 @@ pub async fn launch_qemu(
         // UEFI
         .args([
             "-drive",
-            "if=pflash,format=raw,unit=0,file=/usr/share/edk2/x64/OVMF.4m.fd,readonly=on",
+            "if=pflash,format=raw,unit=0,file=/usr/share/edk2/x64/OVMF_CODE.4m.fd,readonly=on",
         ])
         .args([
             "-drive",
