@@ -24,8 +24,8 @@ pub struct ImageSource {
 /// Parse a string the format `source:dest`
 fn parse_bind_mount(src: &str) -> Result<BindMount, String> {
     let parts: Vec<&str> = src.split(':').collect();
-    if parts.len() != 2 {
-        return Err("Expected format: source:dest".to_string());
+    if parts.len() != 2 && parts.len() != 3 {
+        return Err("Expected format: source:dest[:ro]".to_string());
     }
 
     let source = PathBuf::from(parts[0]);
@@ -41,7 +41,25 @@ fn parse_bind_mount(src: &str) -> Result<BindMount, String> {
         return Err("dest must be an absolute path".to_string());
     }
 
-    Ok(BindMount { source, dest })
+    // Last part (ro) is optional so we have to check for that.
+    if parts.len() == 3 {
+        let options = parts[2];
+        if options == "ro" {
+            return Ok(BindMount {
+                source,
+                dest,
+                read_only: true,
+            });
+        } else {
+            return Err("Expected format: source:dest[:ro]".to_string());
+        }
+    }
+
+    Ok(BindMount {
+        source,
+        dest,
+        read_only: false,
+    })
 }
 
 /// Parse a string into a canonicalized PathBuf and validate that it exists
@@ -64,6 +82,7 @@ fn parse_seconds_to_duration(src: &str) -> Result<Duration, String> {
 pub struct BindMount {
     pub source: PathBuf,
     pub dest: PathBuf,
+    pub read_only: bool,
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -88,6 +107,8 @@ pub struct Cli {
     pub env: Vec<String>,
 
     /// Bind mount a volume into the virtual machine
+    ///
+    /// Expected format: source:dest[:ro]
     #[arg(short, long, value_parser(parse_bind_mount))]
     pub volume: Vec<BindMount>,
 
@@ -131,15 +152,21 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[case("/tmp:/tmp", "/tmp", "/tmp")]
-    #[case("/usr/bin:/somewhere/else", "/usr/bin", "/somewhere/else")]
+    #[case("/tmp:/tmp", "/tmp", "/tmp", false)]
+    #[case("/usr/bin:/somewhere/else", "/usr/bin", "/somewhere/else", false)]
+    #[case("/usr/bin:/somewhere/else:ro", "/usr/bin", "/somewhere/else", true)]
     fn test_parse_bind_volume_valid(
         #[case] volume_input: &str,
         #[case] source: PathBuf,
         #[case] dest: PathBuf,
+        #[case] read_only: bool,
     ) {
         let actual = parse_bind_mount(volume_input).unwrap();
-        let expected = BindMount { source, dest };
+        let expected = BindMount {
+            source,
+            dest,
+            read_only,
+        };
         assert_eq!(actual, expected);
     }
 
@@ -147,8 +174,8 @@ mod tests {
     #[case("tmp:/tmp", "source must be an absolute path")]
     #[case("/nowhere:/tmp", "source doesn't exist")]
     #[case("/tmp:tmp", "dest must be an absolute path")]
-    #[case("/tmp", "Expected format: source:dest")]
-    #[case("/tmp:/tmp:something", "Expected format: source:dest")]
+    #[case("/tmp", "Expected format: source:dest[:ro]")]
+    #[case("/tmp:/tmp:something", "Expected format: source:dest[:ro]")]
     fn test_parse_bind_volume_invalid(#[case] volume_input: &str, #[case] expected: &str) {
         let actual = parse_bind_mount(volume_input).unwrap_err();
         assert_eq!(actual, expected);
