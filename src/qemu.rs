@@ -69,6 +69,10 @@ pub async fn create_overlay_image(tmpdir: &Path, source_image: &Path) -> Result<
     Ok(overlay_image)
 }
 
+/// Launch virtiofsd
+//#[instrument]
+//pub async fn launch_virtiofsd
+
 /// Launch QEMU
 #[instrument(skip(qemu_cancellation_token, ssh_cancellation_token, ssh_pubkey))]
 pub async fn launch_qemu(
@@ -97,12 +101,26 @@ pub async fn launch_qemu(
 
     let mut qemu_cmd = Command::new("qemu-system-x86_64");
     qemu_cmd
-        .arg("-enable-kvm")
-        .args(["-m", &format!("{memory}G")])
+        .args(["accel", "kvm"])
         .args(["-cpu", "host"])
         .args(["-smp", &logical_core_count.to_string()])
+
+        // SSH port forwarding
         .args(["-nic", "user,model=virtio-net-pci,hostfwd=tcp::2222-:22"])
+
+        // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
         .args(["-device", "virtio-balloon,free-page-reporting=on"])
+
+        // Memory configuration
+        .args(["-m", &format!("{memory}G")])
+        .args(["-object", &format!("memory-backend-memfd,id=mem,size={memory}G,share=on")])
+        .args(["-numa", "node,memdev=mem"])
+
+        // Directory sharing
+        .args(["-chardev", "socket,id=char0,path=/tmp/lol.sock"])
+        .args(["-device", "vhost-user-fs-pci,chardev=char0,tag=myfs"])
+
+        // EFI bios
         .args([
             "-drive",
             "if=pflash,format=raw,unit=0,file=/usr/share/edk2/x64/OVMF.4m.fd,readonly=on",
@@ -111,7 +129,12 @@ pub async fn launch_qemu(
             "-drive",
             &format!("if=pflash,format=raw,unit=1,file={ovmf_vars_str}"),
         ])
+
+        // Overlay image
         .args(["-drive", &format!("if=virtio,file={overlay_image_str}")])
+
+        // Here we inject the SSH using systemd.system-credentials, see:
+        // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
         .args([
             "-smbios",
             &format!(
