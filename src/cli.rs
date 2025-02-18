@@ -130,29 +130,26 @@ mod tests {
     use pretty_assertions::assert_eq;
     use rstest::rstest;
 
-    #[rstest(
-        volume_input,
-        source,
-        dest,
-        case("/tmp:/tmp", "/tmp", "/tmp"),
-        case("/usr/bin:/somewhere/else", "/usr/bin", "/somewhere/else")
-    )]
-    fn test_parse_bind_volume_valid(volume_input: &str, source: PathBuf, dest: PathBuf) {
+    #[rstest]
+    #[case("/tmp:/tmp", "/tmp", "/tmp")]
+    #[case("/usr/bin:/somewhere/else", "/usr/bin", "/somewhere/else")]
+    fn test_parse_bind_volume_valid(
+        #[case] volume_input: &str,
+        #[case] source: PathBuf,
+        #[case] dest: PathBuf,
+    ) {
         let actual = parse_bind_mount(volume_input).unwrap();
         let expected = BindMount { source, dest };
         assert_eq!(actual, expected);
     }
 
-    #[rstest(
-        volume_input,
-        expected,
-        case("tmp:/tmp", "source must be an absolute path"),
-        case("/nowhere:/tmp", "source doesn't exist"),
-        case("/tmp:tmp", "dest must be an absolute path"),
-        case("/tmp", "Expected format: source:dest"),
-        case("/tmp:/tmp:something", "Expected format: source:dest")
-    )]
-    fn test_parse_bind_volume_invalid(volume_input: &str, expected: &str) {
+    #[rstest]
+    #[case("tmp:/tmp", "source must be an absolute path")]
+    #[case("/nowhere:/tmp", "source doesn't exist")]
+    #[case("/tmp:tmp", "dest must be an absolute path")]
+    #[case("/tmp", "Expected format: source:dest")]
+    #[case("/tmp:/tmp:something", "Expected format: source:dest")]
+    fn test_parse_bind_volume_invalid(#[case] volume_input: &str, #[case] expected: &str) {
         let actual = parse_bind_mount(volume_input).unwrap_err();
         assert_eq!(actual, expected);
     }
