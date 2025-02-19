@@ -1,6 +1,7 @@
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
+    time::Duration,
 };
 
 use base64ct::Encoding;
@@ -8,10 +9,12 @@ use color_eyre::eyre::{bail, Context, Result};
 use rustix::{fs::IFlags, io::Errno, path::Arg};
 use tokio::{
     fs::{self, File},
-    process::Command,
+    process::{Child, Command},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, trace};
+
+use crate::{cli::BindMount, ExecutablePaths};
 
 /// Get the full command that would be run
 pub fn full_cmd(cmd: &Command) -> String {
@@ -69,16 +72,66 @@ pub async fn create_overlay_image(run_data_dir: &Path, source_image: &Path) -> R
     Ok(overlay_image)
 }
 
-/// Launch virtiofsd
-//#[instrument]
-//pub async fn launch_virtiofsd
+/// Launch an instance of virtiofsd for a particular volume
+#[instrument]
+pub async fn launch_virtiofsd(
+    virtiofsd_path: &Path,
+    run_data_dir: &Path,
+    volume: &BindMount,
+) -> Result<Child> {
+    let socket_path = run_data_dir.join(volume.socket_name());
+    let mut virtiofsd_cmd = Command::new("unshare");
+    virtiofsd_cmd
+        .arg("-r")
+        .arg("--map-auto")
+        .arg("--")
+        .arg(virtiofsd_path)
+        .args(["--shared-dir", volume.source.as_str()?])
+        .args(["--socket-path", socket_path.as_str()?])
+        .args(["--sandbox", "chroot"]);
+
+    let virtiofsd_cmd_str = full_cmd(&virtiofsd_cmd);
+
+    info!("Running virtiofsd for share '{volume}'");
+    trace!("{virtiofsd_cmd_str}");
+
+    let mut virtiofsd_child = virtiofsd_cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    tokio::select! {
+        // I tried very hard to find a reasonable way to check properly for connectivity but there
+        // doesn't seem to be a good way as the server quits after the first connection, see also:
+        // https://gitlab.com/virtio-fs/virtiofsd/-/issues/62
+        // As such, we're going to use a timing based approach for the time being.
+        _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+        _ = virtiofsd_child.wait() => {
+            error!("virtiofsd process exited early, that's usually a bad sign");
+            let virtiofsd_output = virtiofsd_child.wait_with_output().await?;
+            bail!("virtiofsd failed: {}", virtiofsd_output.stderr.to_string_lossy());
+        }
+    }
+
+    Ok(virtiofsd_child)
+}
 
 /// Launch QEMU
-#[instrument(skip(qemu_cancellation_token, ssh_cancellation_token, ssh_pubkey))]
+#[instrument(skip(
+    qemu_cancellation_token,
+    ssh_cancellation_token,
+    tool_paths,
+    show_vm_window,
+    ssh_pubkey
+))]
 pub async fn launch_qemu(
     qemu_cancellation_token: CancellationToken,
     ssh_cancellation_token: CancellationToken,
     run_data_dir: &Path,
+    tool_paths: ExecutablePaths,
+    volumes: Vec<BindMount>,
     overlay_image: &Path,
     show_vm_window: bool,
     ssh_pubkey: String,
@@ -99,7 +152,7 @@ pub async fn launch_qemu(
 
     let ssh_pubkey_base64 = base64ct::Base64::encode_string(ssh_pubkey.as_bytes());
 
-    let mut qemu_cmd = Command::new("qemu-system-x86_64");
+    let mut qemu_cmd = Command::new(tool_paths.qemu_path);
     qemu_cmd
         .args(["-accel", "kvm"])
         .args(["-cpu", "host"])
@@ -115,10 +168,6 @@ pub async fn launch_qemu(
         .args(["-m", &format!("{memory}G")])
         .args(["-object", &format!("memory-backend-memfd,id=mem,size={memory}G,share=on")])
         .args(["-numa", "node,memdev=mem"])
-
-        // Directory sharing
-        .args(["-chardev", "socket,id=char0,path=/tmp/lol.sock"])
-        .args(["-device", "vhost-user-fs-pci,chardev=char0,tag=myfs"])
 
         // UEFI
         .args([
@@ -142,6 +191,28 @@ pub async fn launch_qemu(
             ),
         ]);
 
+    // Directory sharing
+    let mut virtiofsd_handles = vec![];
+    for (i, vol) in volumes.iter().enumerate() {
+        let virtiofsd_child = launch_virtiofsd(&tool_paths.virtiofsd_path, run_data_dir, vol)
+            .await
+            .wrap_err(format!("Failed to launch virtiofsd for {vol}"))?;
+        virtiofsd_handles.push(virtiofsd_child);
+
+        let socket_path = run_data_dir.join(vol.socket_name());
+        let socket_path_str = socket_path.as_str()?;
+        let tag = vol.tag();
+        qemu_cmd
+            .args([
+                "-chardev",
+                &format!("socket,id=char{i},path={socket_path_str}"),
+            ])
+            .args([
+                "-device",
+                &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
+            ]);
+    }
+
     if !show_vm_window {
         qemu_cmd.arg("-nographic");
     }
@@ -163,16 +234,13 @@ pub async fn launch_qemu(
             return Ok(());
         }
         val = qemu_child.wait_with_output() => {
-            debug!("QEMU process exited, that's usually a bad sign");
+            error!("QEMU process exited early, that's usually a bad sign");
             val?
         }
     };
 
     if !qemu_output.status.success() {
-        error!(
-            "QEMU failed: {}",
-            String::from_utf8_lossy(&qemu_output.stderr)
-        );
+        error!("QEMU failed: {}", qemu_output.stderr.to_string_lossy());
         ssh_cancellation_token.cancel();
     }
 

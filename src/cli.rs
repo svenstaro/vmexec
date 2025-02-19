@@ -1,7 +1,9 @@
-use std::{path::PathBuf, time::Duration};
+use std::{fmt::Display, path::PathBuf, time::Duration};
 
 use clap::{Args, Parser, ValueEnum};
 use tracing::Level;
+
+use crate::utils::escape_path;
 
 /// The operating system to run
 #[derive(Debug, Clone, ValueEnum)]
@@ -32,8 +34,8 @@ fn parse_bind_mount(src: &str) -> Result<BindMount, String> {
     if !source.is_absolute() {
         return Err("source must be an absolute path".to_string());
     }
-    if !source.exists() {
-        return Err("source doesn't exist".to_string());
+    if !source.is_dir() {
+        return Err("source doesn't exist or isn't a directory".to_string());
     }
 
     let dest = PathBuf::from(parts[1]);
@@ -85,6 +87,28 @@ pub struct BindMount {
     pub read_only: bool,
 }
 
+impl BindMount {
+    pub fn tag(&self) -> String {
+        escape_path(&self.dest.to_string_lossy())
+    }
+
+    pub fn socket_name(&self) -> String {
+        format!("{}.sock", self.tag())
+    }
+}
+
+impl Display for BindMount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source = self.source.to_string_lossy();
+        let dest = self.dest.to_string_lossy();
+        if self.read_only {
+            write!(f, "{source}:{dest}:ro",)
+        } else {
+            write!(f, "{source}:{dest}")
+        }
+    }
+}
+
 #[derive(Clone, Debug, ValueEnum)]
 pub enum Pull {
     Never,
@@ -108,9 +132,11 @@ pub struct Cli {
 
     /// Bind mount a volume into the virtual machine
     ///
+    /// Can be provided multiple times.
+    ///
     /// Expected format: source:dest[:ro]
-    #[arg(short, long, value_parser(parse_bind_mount))]
-    pub volume: Vec<BindMount>,
+    #[arg(short, long = "volume", value_parser(parse_bind_mount))]
+    pub volumes: Vec<BindMount>,
 
     /// SSH connection timeout
     ///

@@ -1,13 +1,18 @@
+use std::path::PathBuf;
+
 use clap::{crate_name, CommandFactory, Parser};
-use color_eyre::eyre::{Context, OptionExt, Result};
+use color_eyre::eyre::{bail, Context, OptionExt, Result};
 use directories::ProjectDirs;
 use tempfile::TempDir;
+use tokio::process::Command;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, Level};
 
 mod cli;
 mod qemu;
 mod ssh;
+mod utils;
 mod vm_images;
 
 use crate::qemu::{create_overlay_image, launch_qemu};
@@ -27,6 +32,46 @@ fn install_tracing(log_level: Level) {
         .with(fmt_layer)
         .with(ErrorLayer::default())
         .init();
+}
+
+#[derive(Debug)]
+pub struct ExecutablePaths {
+    pub qemu_path: PathBuf,
+    pub virtiofsd_path: PathBuf,
+}
+
+/// Check whether necessary tools are installed and return their paths
+async fn find_required_tools() -> Result<ExecutablePaths> {
+    // Find QEMUU
+    let qemu_path = which::which_global("qemu-system-x86_64")
+        .wrap_err("Couldn't find qemu-system-x86_64 in PATH")?;
+
+    // Find virtiofsd
+    let virtiofsd_path = which::which_in("virtiofsd", Some("/usr/lib:/usr/libexec"), "/")
+        .wrap_err("Couldn't find virtiofsd in /usr/lib or /usr/libexec")?;
+
+    // Check whether unshare is working as expected
+    let unshare_output = Command::new("unshare")
+        .arg("-r")
+        .arg("id")
+        .kill_on_drop(true)
+        .output()
+        .await?;
+    let unshare_stdout = std::str::from_utf8(&unshare_output.stdout)?;
+    let unshare_stderr = std::str::from_utf8(&unshare_output.stderr)?;
+    if !unshare_output.status.success() {
+        bail!(
+            "Test command 'unshare -r id' didn't exit succesfully, stdout: {unshare_stdout}, stderr: {unshare_stderr}"
+        );
+    }
+    if !unshare_stdout.starts_with("uid=0(root) gid=0(root) groups=0(root)") {
+        bail!("Expected output to start with 'unshare -r id' to report 'uid=0(root) gid=0(root) groups=0(root)' but got: {unshare_stdout}");
+    }
+
+    Ok(ExecutablePaths {
+        qemu_path,
+        virtiofsd_path,
+    })
 }
 
 #[tokio::main]
@@ -51,6 +96,9 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Make sure the tools we need are actually installed.
+    let tool_paths = find_required_tools().await?;
+
     let project_dir = ProjectDirs::from("", "", "vmexec").ok_or_eyre("Couldn't get project dir")?;
     let cache_dir = project_dir.cache_dir();
     if !cache_dir.exists() {
@@ -68,6 +116,7 @@ async fn main() -> Result<()> {
     // with a lot of garbage after some time.
     let run_data_dir = TempDir::with_prefix_in("run-", data_dir)
         .wrap_err("Couldn't make temp dir in {data_dir}")?;
+    debug!("run data dir is: {:?}", run_data_dir.path());
 
     let image = if let Some(os) = cli.image_source.os {
         match os {
@@ -88,7 +137,9 @@ async fn main() -> Result<()> {
     let qemu_cancellation_token = CancellationToken::new();
     let ssh_cancellation_token = CancellationToken::new();
 
-    let qemu_task = tokio::spawn({
+    let mut joinset = JoinSet::new();
+
+    joinset.spawn({
         let qemu_cancellation_token_ = qemu_cancellation_token.clone();
         let ssh_cancellation_token_ = ssh_cancellation_token.clone();
         async move {
@@ -96,6 +147,8 @@ async fn main() -> Result<()> {
                 qemu_cancellation_token_,
                 ssh_cancellation_token_,
                 run_data_dir.path(),
+                tool_paths,
+                cli.volumes,
                 &overlay_image,
                 cli.show_vm_window,
                 ssh_keypair.pubkey_str,
@@ -103,7 +156,7 @@ async fn main() -> Result<()> {
             .await
         }
     });
-    let ssh_task = tokio::spawn({
+    joinset.spawn({
         let qemu_cancellation_token_ = qemu_cancellation_token.clone();
         let ssh_cancellation_token_ = ssh_cancellation_token.clone();
         async move {
@@ -118,10 +171,9 @@ async fn main() -> Result<()> {
         }
     });
 
-    // If we get here, we're probably done with SSH as the VM is running forever.
-    // As such, we'll need to try to clean up the VM here.
-    let _ = tokio::join!(qemu_task, ssh_task);
-    debug!("Finished running QEMU and SSH tasks");
+    while let Some(res) = joinset.join_next().await {
+        res??
+    }
 
     Ok(())
 }
