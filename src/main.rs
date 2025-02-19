@@ -17,6 +17,7 @@ mod vm_images;
 
 use crate::qemu::{create_overlay_image, launch_qemu};
 use crate::ssh::{connect_ssh, create_ssh_key};
+use crate::utils::create_free_cid;
 use crate::vm_images::download_archlinux;
 
 fn install_tracing(log_level: Level) {
@@ -124,7 +125,7 @@ async fn main() -> Result<()> {
     let data_dir = project_dir.data_dir();
     if !data_dir.exists() {
         debug!("Data dir {data_dir:?} didn't exist yet, creating");
-        std::fs::create_dir_all(data_dir).wrap_err(format!("Creating cache dir {data_dir:?}"))?;
+        std::fs::create_dir_all(data_dir).wrap_err(format!("Creating data dir {data_dir:?}"))?;
     }
 
     // The data dir for the actual run should be temporary and self-deleting so we don't end up
@@ -132,6 +133,9 @@ async fn main() -> Result<()> {
     let run_data_dir = TempDir::with_prefix_in("run-", data_dir)
         .wrap_err("Couldn't make temp dir in {data_dir}")?;
     debug!("run data dir is: {:?}", run_data_dir.path());
+
+    // We need a free CID for host-guest communication.
+    let cid = create_free_cid(&data_dir, run_data_dir.path()).await?;
 
     let image = if let Some(os) = cli.image_source.os {
         match os {
@@ -150,10 +154,11 @@ async fn main() -> Result<()> {
         overlay_image,
         show_vm_window: cli.show_vm_window,
         ssh_pubkey: ssh_keypair.pubkey_str,
+        cid,
     };
 
     debug!("SSH command for manual debugging:");
-    debug!("ssh root@localhost -p 2222 -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
+    debug!("ssh root@vsock/{cid} -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
 
     let cancellatation_tokens = CancellationTokens::new();
 
@@ -178,6 +183,7 @@ async fn main() -> Result<()> {
                 cancellatation_tokens_,
                 ssh_keypair.privkey_str,
                 cli.ssh_timeout,
+                cid,
                 cli.env,
                 cli.args,
             )

@@ -21,6 +21,7 @@ directories = "6.0.0"
 hex = "0.4.3"
 indicatif = "0.17.11"
 libc = { version = "0.2.169", default-features = false }
+pidfile2 = "0.1.1"
 rattler_digest = { version = "1.0.5", features = ["tokio"] }
 reqwest = "0.12.12"
 russh = "0.50"
@@ -38,6 +39,7 @@ tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "local-time"] }
 url = "2.5.4"
 vhost = { version = "0.13.0", features = ["vhost-user-frontend"] }
+walkdir = "2.5.0"
 which = "7.0.2"
 
 [dev-dependencies]

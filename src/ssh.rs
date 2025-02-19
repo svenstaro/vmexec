@@ -14,7 +14,6 @@ use tokio::time::Instant;
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncWriteExt},
-    net::ToSocketAddrs,
 };
 use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, error, info, instrument};
@@ -88,11 +87,7 @@ pub struct Session {
 
 impl Session {
     #[instrument(skip(privkey))]
-    async fn connect<T: ToSocketAddrs + Debug + Clone>(
-        privkey: PrivateKey,
-        addrs: T,
-        timeout: Duration,
-    ) -> Result<Self> {
+    async fn connect(privkey: PrivateKey, cid: u32, port: u32, timeout: Duration) -> Result<Self> {
         let config = russh::client::Config {
             keepalive_interval: Some(Duration::from_secs(5)),
             ..<_>::default()
@@ -101,11 +96,13 @@ impl Session {
         let config = Arc::new(config);
         let sh = SshClient {};
 
-        let vsock_addr = VsockAddr::new(223, 22);
+        let vsock_addr = VsockAddr::new(cid, port);
         let now = Instant::now();
         debug!("Connecting to SSH via vsock");
         let mut session = loop {
             tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // I would like to apologize for the error handling below.
 
             // Establish vsock connection
             let stream = match VsockStream::connect(vsock_addr).await {
@@ -268,13 +265,14 @@ pub async fn connect_ssh(
     cancellation_tokens: CancellationTokens,
     ssh_privkey: String,
     ssh_timeout: Duration,
+    cid: u32,
     env: Vec<EnvVar>,
     args: Vec<String>,
 ) -> Result<()> {
     let privkey = PrivateKey::from_openssh(ssh_privkey)?;
 
     // Session is a wrapper around a russh client, defined down below
-    let mut ssh = Session::connect(privkey, ("localhost", 2222), ssh_timeout)
+    let mut ssh = Session::connect(privkey, cid, 22, ssh_timeout)
         .await
         .inspect_err(|_| {
             cancellation_tokens.qemu.cancel();

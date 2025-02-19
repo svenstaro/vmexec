@@ -1,3 +1,14 @@
+use std::path::Path;
+use std::time::Duration;
+use std::{fs, io::ErrorKind};
+
+use color_eyre::eyre::bail;
+use color_eyre::{eyre::Error, Result};
+use pidfile::PidFile;
+use tokio::task::spawn_blocking;
+use tracing::{debug, instrument, trace};
+use walkdir::WalkDir;
+
 /// Path escaping, like `systemd-escape --path`.
 ///
 /// From https://github.com/lucab/libsystemd-rs/blob/b43fa5e3b5eca3e6aa16a6c2fad87220dc0ad7a0/src/unit.rs
@@ -30,4 +41,64 @@ fn escape_byte(b: u8, index: usize) -> String {
         '.' if index > 0 => c.to_string(),
         _ => format!(r#"\x{:02x}"#, b),
     }
+}
+
+/// Get a random unused CID to use with vsock
+///
+/// The way this works is that every run dir inside `data_dir` contains its own CID. We then look
+/// at all the CIDs in all run dirs to get the current list of CIDs that are in-use and just pick
+/// the next free one.
+///
+/// This function uses locking so that multiple instances of `vmexec` to not race each other.
+#[instrument]
+pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32> {
+    let mut cids = vec![];
+    let data_dir = data_dir.to_owned();
+    let run_data_dir = run_data_dir.to_owned();
+
+    let cid: Result<u32, Error> = spawn_blocking(move || {
+        let _lockfile = loop {
+            std::thread::sleep(Duration::from_millis(100));
+
+            // Lock this operation so other instances of vmexec don't race us for CIDs.
+            let lockfile_path = data_dir.join("pid-lockfile");
+            trace!("Trying to lock {lockfile_path:?}");
+            match PidFile::new(lockfile_path) {
+                Ok(lockfile) => break lockfile,
+                Err(ref e) => match e.kind() {
+                    // AddrInUse means we're going to have to wait on the lock.
+                    ErrorKind::AddrInUse => continue,
+                    e => bail!(e),
+                },
+            };
+        };
+
+        for entry in WalkDir::new(&data_dir).into_iter().filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy();
+
+            if name == "cid" {
+                trace!("Found CID file at {:?}", entry.path());
+                let cid = fs::read_to_string(entry.path())?;
+                cids.push(cid.parse::<u32>()?);
+            }
+        }
+
+        // Get the next CID.
+        cids.sort();
+        let cid = if let Some(last_cid) = cids.iter().next_back() {
+            let next_cid = last_cid + 1;
+            next_cid
+        } else {
+            // We get here if the current list of CIDs is empty. So we'll just start with some
+            // arbitrary CID.
+            10
+        };
+
+        debug!("Our new CID: {cid}");
+        fs::write(run_data_dir.join("cid"), cid.to_string())?;
+        Ok(cid)
+    })
+    .await?;
+
+    Ok(cid?)
 }

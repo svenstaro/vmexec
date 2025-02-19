@@ -127,6 +127,7 @@ pub struct QemuLaunchOpts {
     pub overlay_image: PathBuf,
     pub show_vm_window: bool,
     pub ssh_pubkey: String,
+    pub cid: u32,
 }
 
 /// Launch QEMU
@@ -155,6 +156,7 @@ pub async fn launch_qemu(
 
     let sshd_dropin = "[Service]\nExecStart=\nExecStart=/usr/bin/sshd -D -o 'AcceptEnv *'\n";
     let sshd_dropin_base64 = Base64::encode_string(sshd_dropin.as_bytes());
+    let cid = qemu_launch_opts.cid;
 
     let mut qemu_cmd = Command::new(tool_paths.qemu_path);
     qemu_cmd
@@ -163,8 +165,7 @@ pub async fn launch_qemu(
         .args(["-smp", &logical_core_count.to_string()])
 
         // SSH port forwarding
-        //.args(["-nic", "user,model=virtio-net-pci,hostfwd=tcp::2222-:22"])
-        .args(["-device", "vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid=123"])
+        .args(["-device", &format!("vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid={cid}")])
 
         // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
         .args(["-device", "virtio-balloon,free-page-reporting=on"])
