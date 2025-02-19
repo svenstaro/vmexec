@@ -11,5 +11,4 @@ Run a single command in a virtual machine
 - Document/bench KSM
 - VM memory templating
 - Terminal resizing
-- Generate hostname?
 - VSock
