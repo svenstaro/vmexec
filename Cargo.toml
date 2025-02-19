@@ -8,7 +8,7 @@ lto = true
 codegen-units = 1
 strip = true
 
-[profile.dev.package.sha2]]
+[profile.dev.package.sha2]
 opt-level = 3
 
 [dependencies]
