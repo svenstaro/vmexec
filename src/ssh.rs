@@ -19,6 +19,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
 
+use crate::cli::EnvVar;
+
 #[derive(Clone, Debug)]
 pub struct PersistedSshKeypair {
     pub pubkey_str: String,
@@ -147,7 +149,7 @@ impl Session {
     }
 
     #[instrument(skip(self))]
-    async fn call(&mut self, command: &str) -> Result<u32> {
+    async fn call(&mut self, env: Vec<EnvVar>, command: &str) -> Result<u32> {
         let mut channel = self.session.channel_open_session().await?;
 
         // This example doesn't terminal resizing after the connection is established
@@ -156,7 +158,7 @@ impl Session {
         // Request an interactive PTY from the server
         channel
             .request_pty(
-                false,
+                true,
                 &env::var("TERM").unwrap_or("xterm-256color".into()),
                 w as u32,
                 h as u32,
@@ -165,6 +167,12 @@ impl Session {
                 &[], // ideally you want to pass the actual terminal modes here
             )
             .await?;
+
+        for e in env {
+            channel.set_env(true, e.key, e.value).await?;
+        }
+
+        //channel.request_shell(true).await?;
         channel.exec(true, command).await?;
 
         let code;
@@ -228,6 +236,7 @@ pub async fn connect_ssh(
     ssh_cancellation_token: CancellationToken,
     ssh_privkey: String,
     ssh_timeout: Duration,
+    env: Vec<EnvVar>,
     args: Vec<String>,
 ) -> Result<()> {
     let privkey = PrivateKey::from_openssh(ssh_privkey)?;
@@ -255,7 +264,7 @@ pub async fn connect_ssh(
                 debug!("SSH task was cancelled");
                 return Ok(())
             }
-            val = ssh.call(escaped_args) => {
+            val = ssh.call(env, escaped_args) => {
                 val
             }
         };
@@ -263,7 +272,7 @@ pub async fn connect_ssh(
         ssh_output?
     };
 
-    println!("Exitcode: {:?}", code);
+    info!("Exit code: {:?}", code);
     qemu_cancellation_token.cancel();
     ssh.close().await?;
     Ok(())

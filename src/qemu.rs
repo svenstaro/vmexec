@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use base64ct::Encoding;
+use base64ct::{Base64, Encoding};
 use color_eyre::eyre::{bail, Context, Result};
 use rustix::{fs::IFlags, io::Errno, path::Arg};
 use tokio::{
@@ -158,7 +158,10 @@ pub async fn launch_qemu(
     let memory = sysinfo_system.total_memory() / 1024 / 1024 / 1024;
     let logical_core_count = sysinfo_system.cpus().len();
 
-    let ssh_pubkey_base64 = base64ct::Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
+    let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
+
+    let sshd_dropin = "[Service]\nExecStart=\nExecStart=/usr/bin/sshd -D -o 'AcceptEnv *'\n";
+    let sshd_dropin_base64 = Base64::encode_string(sshd_dropin.as_bytes());
 
     let mut qemu_cmd = Command::new(tool_paths.qemu_path);
     qemu_cmd
@@ -197,6 +200,14 @@ pub async fn launch_qemu(
             &format!(
                 "type=11,value=io.systemd.credential.binary:ssh.authorized_keys.root={ssh_pubkey_base64}"
             ),
+        ])
+
+        // Allow setting arbitrary environment variables.
+        .args([
+            "-smbios",
+            &format!(
+                "type=11,value=io.systemd.credential.binary:systemd.unit-dropin.sshd.service={sshd_dropin_base64}"
+            ),
         ]);
 
     // Directory sharing
@@ -217,7 +228,7 @@ pub async fn launch_qemu(
             String::new()
         };
         let fstab = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
-        let fstab_base64 = base64ct::Base64::encode_string(fstab.as_bytes());
+        let fstab_base64 = Base64::encode_string(fstab.as_bytes());
         qemu_cmd
             .args([
                 "-chardev",

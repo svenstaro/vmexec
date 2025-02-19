@@ -168,6 +168,7 @@ async fn main() -> Result<()> {
                 ssh_cancellation_token_,
                 ssh_keypair.privkey_str,
                 cli.ssh_timeout,
+                cli.env,
                 cli.args,
             )
             .await

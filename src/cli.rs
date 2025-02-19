@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::PathBuf, time::Duration};
+use std::{fmt::Display, path::PathBuf, str::FromStr, time::Duration};
 
 use clap::{Args, Parser, ValueEnum};
 use tracing::Level;
@@ -115,6 +115,28 @@ pub enum Pull {
     Newer,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvVar {
+    pub key: String,
+    pub value: String,
+}
+
+impl FromStr for EnvVar {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split('=').collect();
+
+        if parts.len() != 2 {
+            return Err("Expected format: KEY=VALUE".to_string());
+        }
+        Ok(Self {
+            key: parts[0].to_string(),
+            value: parts[1].to_string(),
+        })
+    }
+}
+
 /// Run a command in a new virtual machine
 #[derive(Debug, Clone, Parser)]
 #[command(name = "vmexec", author, about, version)]
@@ -127,8 +149,12 @@ pub struct Cli {
     pub image_source: ImageSource,
 
     /// Set environment variables for the process inside the virtual machine
-    #[arg(short, long)]
-    pub env: Vec<String>,
+    ///
+    /// Can be provided multiple times.
+    ///
+    /// Expected format: KEY=VALUE
+    #[arg(short, long, value_parser(EnvVar::from_str))]
+    pub env: Vec<EnvVar>,
 
     /// Bind mount a volume into the virtual machine
     ///
@@ -182,12 +208,12 @@ mod tests {
     #[case("/usr/bin:/somewhere/else", "/usr/bin", "/somewhere/else", false)]
     #[case("/usr/bin:/somewhere/else:ro", "/usr/bin", "/somewhere/else", true)]
     fn test_parse_bind_volume_valid(
-        #[case] volume_input: &str,
+        #[case] input: &str,
         #[case] source: PathBuf,
         #[case] dest: PathBuf,
         #[case] read_only: bool,
     ) {
-        let actual = parse_bind_mount(volume_input).unwrap();
+        let actual = parse_bind_mount(input).unwrap();
         let expected = BindMount {
             source,
             dest,
@@ -198,12 +224,31 @@ mod tests {
 
     #[rstest]
     #[case("tmp:/tmp", "source must be an absolute path")]
-    #[case("/nowhere:/tmp", "source doesn't exist")]
+    #[case("/nowhere:/tmp", "source doesn't exist or isn't a directory")]
     #[case("/tmp:tmp", "dest must be an absolute path")]
     #[case("/tmp", "Expected format: source:dest[:ro]")]
     #[case("/tmp:/tmp:something", "Expected format: source:dest[:ro]")]
-    fn test_parse_bind_volume_invalid(#[case] volume_input: &str, #[case] expected: &str) {
-        let actual = parse_bind_mount(volume_input).unwrap_err();
+    fn test_parse_bind_volume_invalid(#[case] input: &str, #[case] expected: &str) {
+        let actual = parse_bind_mount(input).unwrap_err();
+        assert_eq!(actual, expected);
+    }
+
+    #[rstest]
+    #[case("key=value", "key", "value")]
+    #[case("KEY=VALUE", "KEY", "VALUE")]
+    fn test_parse_env_var_valid(#[case] input: &str, #[case] key: String, #[case] value: String) {
+        let actual = EnvVar::from_str(input).unwrap();
+        let expected = EnvVar { key, value };
+
+        assert_eq!(actual, expected);
+    }
+
+    #[rstest]
+    #[case("keyvalue", "Expected format: KEY=VALUE")]
+    #[case("=key=value", "Expected format: KEY=VALUE")]
+    #[case("key=value=", "Expected format: KEY=VALUE")]
+    fn test_parse_env_var_invalid(#[case] input: &str, #[case] expected: &str) {
+        let actual = EnvVar::from_str(input).unwrap_err();
         assert_eq!(actual, expected);
     }
 }
