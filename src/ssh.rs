@@ -17,6 +17,7 @@ use tokio::{
     net::ToSocketAddrs,
 };
 use tokio_util::sync::CancellationToken;
+use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, error, info, instrument};
 
 use crate::cli::EnvVar;
@@ -100,11 +101,28 @@ impl Session {
         let config = Arc::new(config);
         let sh = SshClient {};
 
+        let vsock_addr = VsockAddr::new(123, 22);
         let now = Instant::now();
-        debug!("Connecting to SSH");
-
+        debug!("Connecting to SSH via vsock");
         let mut session = loop {
-            match russh::client::connect(config.clone(), addrs.clone(), sh.clone()).await {
+            let stream = match VsockStream::connect(vsock_addr).await {
+                Ok(stream) => stream,
+                Err(ref e) if e.raw_os_error() == Some(19) => {
+                    // This is "No such device" but for some reason Rust doesn't have an IO
+                    // ErrorKind for it. Meh.
+                    continue;
+                }
+                Err(ref e) => match e.kind() {
+                    ErrorKind::TimedOut
+                    | ErrorKind::ConnectionRefused
+                    | ErrorKind::ConnectionReset => continue,
+                    e => {
+                        error!("Unhandled error occured: {e}");
+                        bail!("Unknown error");
+                    }
+                },
+            };
+            match russh::client::connect_stream(config.clone(), stream, sh.clone()).await {
                 Ok(x) => break x,
                 Err(russh::Error::IO(ref e)) => {
                     match e.kind() {

@@ -40,6 +40,12 @@ pub struct ExecutablePaths {
     pub virtiofsd_path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct CancellationTokens {
+    pub qemu_cancellation_token: CancellationToken,
+    pub ssh_cancellation_token: CancellationToken,
+}
+
 /// Check whether necessary tools are installed and return their paths
 async fn find_required_tools() -> Result<ExecutablePaths> {
     // Find QEMUU

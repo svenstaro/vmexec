@@ -170,7 +170,8 @@ pub async fn launch_qemu(
         .args(["-smp", &logical_core_count.to_string()])
 
         // SSH port forwarding
-        .args(["-nic", "user,model=virtio-net-pci,hostfwd=tcp::2222-:22"])
+        //.args(["-nic", "user,model=virtio-net-pci,hostfwd=tcp::2222-:22"])
+        .args(["-device", "vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid=123"])
 
         // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
         .args(["-device", "virtio-balloon,free-page-reporting=on"])

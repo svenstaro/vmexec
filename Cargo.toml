@@ -24,7 +24,6 @@ libc = { version = "0.2.169", default-features = false }
 rattler_digest = { version = "1.0.5", features = ["tokio"] }
 reqwest = "0.12.12"
 russh = "0.50"
-russh-config = "0.50.0"
 rustix = { version = "0.38.42", features = ["fs"] }
 shell-escape = "0.1.5"
 sysinfo = "0.33.0"
@@ -33,6 +32,7 @@ termion = "4.0.3"
 tokio = { version = "1.42.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread"] }
 tokio-fd = "0.3.0"
 tokio-util = "0.7.13"
+tokio-vsock = "0.7.0"
 tracing = { version = "0.1.41", features = ["log"] }
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "local-time"] }
