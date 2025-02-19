@@ -101,27 +101,42 @@ impl Session {
         let config = Arc::new(config);
         let sh = SshClient {};
 
-        let vsock_addr = VsockAddr::new(123, 22);
+        let vsock_addr = VsockAddr::new(223, 22);
         let now = Instant::now();
         debug!("Connecting to SSH via vsock");
         let mut session = loop {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Establish vsock connection
             let stream = match VsockStream::connect(vsock_addr).await {
                 Ok(stream) => stream,
                 Err(ref e) if e.raw_os_error() == Some(19) => {
                     // This is "No such device" but for some reason Rust doesn't have an IO
                     // ErrorKind for it. Meh.
+                    if now.elapsed() > timeout {
+                        error!("Reached timeout trying to connect to virtual machine via SSH, aborting");
+                        bail!("Timeout");
+                    }
                     continue;
                 }
                 Err(ref e) => match e.kind() {
                     ErrorKind::TimedOut
                     | ErrorKind::ConnectionRefused
-                    | ErrorKind::ConnectionReset => continue,
+                    | ErrorKind::ConnectionReset => {
+                        if now.elapsed() > timeout {
+                            error!("Reached timeout trying to connect to virtual machine via SSH, aborting");
+                            bail!("Timeout");
+                        }
+                        continue;
+                    }
                     e => {
                         error!("Unhandled error occured: {e}");
                         bail!("Unknown error");
                     }
                 },
             };
+
+            // Connect to SSH via vsock stream
             match russh::client::connect_stream(config.clone(), stream, sh.clone()).await {
                 Ok(x) => break x,
                 Err(russh::Error::IO(ref e)) => {
