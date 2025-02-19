@@ -122,28 +122,32 @@ pub async fn launch_virtiofsd(
     Ok(virtiofsd_child)
 }
 
+#[derive(Debug, Clone)]
+pub struct QemuLaunchOpts {
+    pub volumes: Vec<BindMount>,
+    pub overlay_image: PathBuf,
+    pub show_vm_window: bool,
+    pub ssh_pubkey: String,
+}
+
 /// Launch QEMU
 #[instrument(skip(
     qemu_cancellation_token,
     ssh_cancellation_token,
     tool_paths,
-    show_vm_window,
-    ssh_pubkey
+    qemu_launch_opts,
 ))]
 pub async fn launch_qemu(
     qemu_cancellation_token: CancellationToken,
     ssh_cancellation_token: CancellationToken,
     run_data_dir: &Path,
     tool_paths: ExecutablePaths,
-    volumes: Vec<BindMount>,
-    overlay_image: &Path,
-    show_vm_window: bool,
-    ssh_pubkey: String,
+    qemu_launch_opts: QemuLaunchOpts,
 ) -> Result<()> {
     let ovmf_vars = run_data_dir.join("OVMF_VARS.4m.fd");
     fs::copy("/usr/share/edk2/x64/OVMF_VARS.4m.fd", &ovmf_vars).await?;
 
-    let overlay_image_str = overlay_image.to_string_lossy();
+    let overlay_image_str = qemu_launch_opts.overlay_image.to_string_lossy();
     let ovmf_vars_str = ovmf_vars.to_string_lossy();
 
     let sysinfo_system = sysinfo::System::new_with_specifics(
@@ -154,7 +158,7 @@ pub async fn launch_qemu(
     let memory = sysinfo_system.total_memory() / 1024 / 1024 / 1024;
     let logical_core_count = sysinfo_system.cpus().len();
 
-    let ssh_pubkey_base64 = base64ct::Base64::encode_string(ssh_pubkey.as_bytes());
+    let ssh_pubkey_base64 = base64ct::Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
 
     let mut qemu_cmd = Command::new(tool_paths.qemu_path);
     qemu_cmd
@@ -197,7 +201,7 @@ pub async fn launch_qemu(
 
     // Directory sharing
     let mut virtiofsd_handles = vec![];
-    for (i, vol) in volumes.iter().enumerate() {
+    for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
         let virtiofsd_child = launch_virtiofsd(&tool_paths.virtiofsd_path, run_data_dir, vol)
             .await
             .wrap_err(format!("Failed to launch virtiofsd for {vol}"))?;
@@ -229,7 +233,7 @@ pub async fn launch_qemu(
             ]);
     }
 
-    if !show_vm_window {
+    if !qemu_launch_opts.show_vm_window {
         qemu_cmd.arg("-nographic");
     }
 

@@ -130,6 +130,12 @@ async fn main() -> Result<()> {
 
     let ssh_keypair = create_ssh_key(run_data_dir.path()).await?;
     let overlay_image = create_overlay_image(run_data_dir.path(), &image).await?;
+    let qemu_launch_opts = qemu::QemuLaunchOpts {
+        volumes: cli.volumes,
+        overlay_image,
+        show_vm_window: cli.show_vm_window,
+        ssh_pubkey: ssh_keypair.pubkey_str,
+    };
 
     debug!("SSH command for manual debugging:");
     debug!("ssh root@localhost -p 2222 -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
@@ -148,10 +154,7 @@ async fn main() -> Result<()> {
                 ssh_cancellation_token_,
                 run_data_dir.path(),
                 tool_paths,
-                cli.volumes,
-                &overlay_image,
-                cli.show_vm_window,
-                ssh_keypair.pubkey_str,
+                qemu_launch_opts,
             )
             .await
         }
