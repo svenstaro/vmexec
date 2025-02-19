@@ -90,6 +90,10 @@ pub async fn launch_virtiofsd(
         .args(["--socket-path", socket_path.as_str()?])
         .args(["--sandbox", "chroot"]);
 
+    if volume.read_only {
+        virtiofsd_cmd.arg("--readonly");
+    }
+
     let virtiofsd_cmd_str = full_cmd(&virtiofsd_cmd);
 
     info!("Running virtiofsd for share '{volume}'");

@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
     let data_dir = project_dir.data_dir();
     if !data_dir.exists() {
         debug!("Data dir {data_dir:?} didn't exist yet, creating");
-        std::fs::create_dir_all(&data_dir).wrap_err(format!("Creating cache dir {data_dir:?}"))?;
+        std::fs::create_dir_all(data_dir).wrap_err(format!("Creating cache dir {data_dir:?}"))?;
     }
 
     // The data dir for the actual run should be temporary and self-deleting so we don't end up
