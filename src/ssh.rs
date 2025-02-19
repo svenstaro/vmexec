@@ -16,11 +16,11 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::ToSocketAddrs,
 };
-use tokio_util::sync::CancellationToken;
 use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, error, info, instrument};
 
 use crate::cli::EnvVar;
+use crate::CancellationTokens;
 
 #[derive(Clone, Debug)]
 pub struct PersistedSshKeypair {
@@ -248,10 +248,9 @@ impl Session {
 }
 
 /// Connect SSH
-#[instrument(skip(qemu_cancellation_token, ssh_cancellation_token, ssh_privkey))]
+#[instrument(skip(cancellation_tokens, ssh_privkey))]
 pub async fn connect_ssh(
-    qemu_cancellation_token: CancellationToken,
-    ssh_cancellation_token: CancellationToken,
+    cancellation_tokens: CancellationTokens,
     ssh_privkey: String,
     ssh_timeout: Duration,
     env: Vec<EnvVar>,
@@ -263,7 +262,7 @@ pub async fn connect_ssh(
     let mut ssh = Session::connect(privkey, ("localhost", 2222), ssh_timeout)
         .await
         .inspect_err(|_| {
-            qemu_cancellation_token.cancel();
+            cancellation_tokens.qemu.cancel();
         })?;
     info!("Connected");
 
@@ -278,7 +277,7 @@ pub async fn connect_ssh(
             .collect::<Vec<_>>()
             .join(" ");
         let ssh_output = tokio::select! {
-            _ = ssh_cancellation_token.cancelled() => {
+            _ = cancellation_tokens.ssh.cancelled() => {
                 debug!("SSH task was cancelled");
                 return Ok(())
             }
@@ -286,12 +285,12 @@ pub async fn connect_ssh(
                 val
             }
         };
-        qemu_cancellation_token.cancel();
+        cancellation_tokens.qemu.cancel();
         ssh_output?
     };
 
     info!("Exit code: {:?}", code);
-    qemu_cancellation_token.cancel();
+    cancellation_tokens.qemu.cancel();
     ssh.close().await?;
     Ok(())
 }

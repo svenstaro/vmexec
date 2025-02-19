@@ -11,10 +11,9 @@ use tokio::{
     fs::{self, File},
     process::{Child, Command},
 };
-use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::{cli::BindMount, ExecutablePaths};
+use crate::{cli::BindMount, CancellationTokens, ExecutablePaths};
 
 /// Get the full command that would be run
 pub fn full_cmd(cmd: &Command) -> String {
@@ -131,15 +130,9 @@ pub struct QemuLaunchOpts {
 }
 
 /// Launch QEMU
-#[instrument(skip(
-    qemu_cancellation_token,
-    ssh_cancellation_token,
-    tool_paths,
-    qemu_launch_opts,
-))]
+#[instrument(skip(cancellation_tokens, tool_paths, qemu_launch_opts,))]
 pub async fn launch_qemu(
-    qemu_cancellation_token: CancellationToken,
-    ssh_cancellation_token: CancellationToken,
+    cancellation_tokens: CancellationTokens,
     run_data_dir: &Path,
     tool_paths: ExecutablePaths,
     qemu_launch_opts: QemuLaunchOpts,
@@ -261,7 +254,7 @@ pub async fn launch_qemu(
         .spawn()?;
 
     let qemu_output = tokio::select! {
-        _ = qemu_cancellation_token.cancelled() => {
+        _ = cancellation_tokens.qemu.cancelled() => {
             debug!("QEMU task was cancelled");
             return Ok(());
         }
@@ -273,7 +266,7 @@ pub async fn launch_qemu(
 
     if !qemu_output.status.success() {
         error!("QEMU failed: {}", qemu_output.stderr.to_string_lossy());
-        ssh_cancellation_token.cancel();
+        cancellation_tokens.ssh.cancel();
     }
 
     Ok(())

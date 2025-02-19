@@ -42,8 +42,17 @@ pub struct ExecutablePaths {
 
 #[derive(Debug, Clone)]
 pub struct CancellationTokens {
-    pub qemu_cancellation_token: CancellationToken,
-    pub ssh_cancellation_token: CancellationToken,
+    pub qemu: CancellationToken,
+    pub ssh: CancellationToken,
+}
+
+impl CancellationTokens {
+    pub fn new() -> Self {
+        Self {
+            qemu: CancellationToken::new(),
+            ssh: CancellationToken::new(),
+        }
+    }
 }
 
 /// Check whether necessary tools are installed and return their paths
@@ -146,18 +155,15 @@ async fn main() -> Result<()> {
     debug!("SSH command for manual debugging:");
     debug!("ssh root@localhost -p 2222 -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
 
-    let qemu_cancellation_token = CancellationToken::new();
-    let ssh_cancellation_token = CancellationToken::new();
+    let cancellatation_tokens = CancellationTokens::new();
 
     let mut joinset = JoinSet::new();
 
     joinset.spawn({
-        let qemu_cancellation_token_ = qemu_cancellation_token.clone();
-        let ssh_cancellation_token_ = ssh_cancellation_token.clone();
+        let cancellatation_tokens_ = cancellatation_tokens.clone();
         async move {
             launch_qemu(
-                qemu_cancellation_token_,
-                ssh_cancellation_token_,
+                cancellatation_tokens_,
                 run_data_dir.path(),
                 tool_paths,
                 qemu_launch_opts,
@@ -166,12 +172,10 @@ async fn main() -> Result<()> {
         }
     });
     joinset.spawn({
-        let qemu_cancellation_token_ = qemu_cancellation_token.clone();
-        let ssh_cancellation_token_ = ssh_cancellation_token.clone();
+        let cancellatation_tokens_ = cancellatation_tokens.clone();
         async move {
             connect_ssh(
-                qemu_cancellation_token_,
-                ssh_cancellation_token_,
+                cancellatation_tokens_,
                 ssh_keypair.privkey_str,
                 cli.ssh_timeout,
                 cli.env,
