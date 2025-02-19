@@ -23,47 +23,6 @@ pub struct ImageSource {
     pub image: Option<PathBuf>,
 }
 
-/// Parse a string the format `source:dest`
-fn parse_bind_mount(src: &str) -> Result<BindMount, String> {
-    let parts: Vec<&str> = src.split(':').collect();
-    if parts.len() != 2 && parts.len() != 3 {
-        return Err("Expected format: source:dest[:ro]".to_string());
-    }
-
-    let source = PathBuf::from(parts[0]);
-    if !source.is_absolute() {
-        return Err("source must be an absolute path".to_string());
-    }
-    if !source.is_dir() {
-        return Err("source doesn't exist or isn't a directory".to_string());
-    }
-
-    let dest = PathBuf::from(parts[1]);
-    if !dest.is_absolute() {
-        return Err("dest must be an absolute path".to_string());
-    }
-
-    // Last part (ro) is optional so we have to check for that.
-    if parts.len() == 3 {
-        let options = parts[2];
-        if options == "ro" {
-            return Ok(BindMount {
-                source,
-                dest,
-                read_only: true,
-            });
-        } else {
-            return Err("Expected format: source:dest[:ro]".to_string());
-        }
-    }
-
-    Ok(BindMount {
-        source,
-        dest,
-        read_only: false,
-    })
-}
-
 /// Parse a string into a canonicalized PathBuf and validate that it exists
 fn parse_existing_pathbuf(src: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(src)
@@ -109,6 +68,51 @@ impl Display for BindMount {
     }
 }
 
+/// Parse a string the format `source:dest`
+impl FromStr for BindMount {
+    type Err = String;
+
+    fn from_str(src: &str) -> Result<BindMount, String> {
+        let parts: Vec<&str> = src.split(':').collect();
+        if parts.len() != 2 && parts.len() != 3 {
+            return Err("Expected format: source:dest[:ro]".to_string());
+        }
+
+        let source = PathBuf::from(parts[0]);
+        if !source.is_absolute() {
+            return Err("source must be an absolute path".to_string());
+        }
+        if !source.is_dir() {
+            return Err("source doesn't exist or isn't a directory".to_string());
+        }
+
+        let dest = PathBuf::from(parts[1]);
+        if !dest.is_absolute() {
+            return Err("dest must be an absolute path".to_string());
+        }
+
+        // Last part (ro) is optional so we have to check for that.
+        if parts.len() == 3 {
+            let options = parts[2];
+            if options == "ro" {
+                return Ok(BindMount {
+                    source,
+                    dest,
+                    read_only: true,
+                });
+            } else {
+                return Err("Expected format: source:dest[:ro]".to_string());
+            }
+        }
+
+        Ok(BindMount {
+            source,
+            dest,
+            read_only: false,
+        })
+    }
+}
+
 #[derive(Clone, Debug, ValueEnum)]
 pub enum Pull {
     Never,
@@ -124,8 +128,8 @@ pub struct EnvVar {
 impl FromStr for EnvVar {
     type Err = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split('=').collect();
+    fn from_str(src: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = src.split('=').collect();
 
         if parts.len() != 2 {
             return Err("Expected format: KEY=VALUE".to_string());
@@ -161,7 +165,7 @@ pub struct Cli {
     /// Can be provided multiple times.
     ///
     /// Expected format: source:dest[:ro]
-    #[arg(short, long = "volume", value_parser(parse_bind_mount))]
+    #[arg(short, long = "volume", value_parser(BindMount::from_str))]
     pub volumes: Vec<BindMount>,
 
     /// SSH connection timeout
