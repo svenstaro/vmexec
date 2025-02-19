@@ -217,7 +217,7 @@ mod tests {
         #[case] dest: PathBuf,
         #[case] read_only: bool,
     ) {
-        let actual = parse_bind_mount(input).unwrap();
+        let actual = BindMount::from_str(input).unwrap();
         let expected = BindMount {
             source,
             dest,
@@ -233,7 +233,7 @@ mod tests {
     #[case("/tmp", "Expected format: source:dest[:ro]")]
     #[case("/tmp:/tmp:something", "Expected format: source:dest[:ro]")]
     fn test_parse_bind_volume_invalid(#[case] input: &str, #[case] expected: &str) {
-        let actual = parse_bind_mount(input).unwrap_err();
+        let actual = BindMount::from_str(input).unwrap_err();
         assert_eq!(actual, expected);
     }
 
