@@ -205,8 +205,15 @@ pub async fn launch_qemu(
 
         let socket_path = run_data_dir.join(vol.socket_name());
         let socket_path_str = socket_path.as_str()?;
-        let dest_path = vol.dest.to_string_lossy();
         let tag = vol.tag();
+        let dest_path = vol.dest.to_string_lossy();
+        let read_only = if vol.read_only {
+            format!(",ro")
+        } else {
+            String::new()
+        };
+        let fstab = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
+        let fstab_base64 = base64ct::Base64::encode_string(fstab.as_bytes());
         qemu_cmd
             .args([
                 "-chardev",
@@ -218,9 +225,7 @@ pub async fn launch_qemu(
             ])
             .args([
                 "-smbios",
-                &format!(
-                    "type=11,value=io.systemd.credential:fstab.extra={tag} {dest_path} virtiofs defaults 0 0"
-                ),
+                &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
             ]);
     }
 
