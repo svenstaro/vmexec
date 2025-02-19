@@ -205,6 +205,7 @@ pub async fn launch_qemu(
 
         let socket_path = run_data_dir.join(vol.socket_name());
         let socket_path_str = socket_path.as_str()?;
+        let dest_path = vol.dest.to_string_lossy();
         let tag = vol.tag();
         qemu_cmd
             .args([
@@ -214,6 +215,12 @@ pub async fn launch_qemu(
             .args([
                 "-device",
                 &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
+            ])
+            .args([
+                "-smbios",
+                &format!(
+                    "type=11,value=io.systemd.credential:fstab.extra={tag} {dest_path} virtiofs defaults 0 0"
+                ),
             ]);
     }
 
