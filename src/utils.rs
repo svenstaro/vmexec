@@ -1,10 +1,11 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{fs, io::ErrorKind};
 
-use color_eyre::eyre::bail;
+use color_eyre::eyre::{bail, Context};
 use color_eyre::{eyre::Error, Result};
 use pidfile::PidFile;
+use tokio::process::Command;
 use tokio::task::spawn_blocking;
 use tracing::{debug, instrument, trace};
 use walkdir::WalkDir;
@@ -100,4 +101,44 @@ pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32
     .await?;
 
     cid
+}
+
+#[derive(Debug)]
+pub struct ExecutablePaths {
+    pub qemu_path: PathBuf,
+    pub virtiofsd_path: PathBuf,
+}
+
+/// Check whether necessary tools are installed and return their paths
+pub async fn find_required_tools() -> Result<ExecutablePaths> {
+    // Find QEMUU
+    let qemu_path = which::which_global("qemu-system-x86_64")
+        .wrap_err("Couldn't find qemu-system-x86_64 in PATH")?;
+
+    // Find virtiofsd
+    let virtiofsd_path = which::which_in("virtiofsd", Some("/usr/lib:/usr/libexec"), "/")
+        .wrap_err("Couldn't find virtiofsd in /usr/lib or /usr/libexec")?;
+
+    // Check whether unshare is working as expected
+    let unshare_output = Command::new("unshare")
+        .arg("-r")
+        .arg("id")
+        .kill_on_drop(true)
+        .output()
+        .await?;
+    let unshare_stdout = std::str::from_utf8(&unshare_output.stdout)?;
+    let unshare_stderr = std::str::from_utf8(&unshare_output.stderr)?;
+    if !unshare_output.status.success() {
+        bail!(
+            "Test command 'unshare -r id' didn't exit succesfully, stdout: {unshare_stdout}, stderr: {unshare_stderr}"
+        );
+    }
+    if !unshare_stdout.starts_with("uid=0(root) gid=0(root) groups=0(root)") {
+        bail!("Expected output to start with 'unshare -r id' to report 'uid=0(root) gid=0(root) groups=0(root)' but got: {unshare_stdout}");
+    }
+
+    Ok(ExecutablePaths {
+        qemu_path,
+        virtiofsd_path,
+    })
 }

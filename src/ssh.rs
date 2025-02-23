@@ -19,7 +19,7 @@ use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, error, info, instrument};
 
 use crate::cli::EnvVar;
-use crate::CancellationTokens;
+use crate::runner::CancellationTokens;
 
 #[derive(Clone, Debug)]
 pub struct PersistedSshKeypair {
@@ -27,6 +27,15 @@ pub struct PersistedSshKeypair {
     pub _pubkey_path: PathBuf,
     pub privkey_str: String,
     pub privkey_path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub struct SshLaunchOpts {
+    pub privkey: String,
+    pub timeout: Duration,
+    pub env_vars: Vec<EnvVar>,
+    pub args: Vec<String>,
+    pub cid: u32,
 }
 
 /// Create SSH key to be used with the virtual machine
@@ -260,19 +269,15 @@ impl Session {
 }
 
 /// Connect SSH
-#[instrument(skip(cancellation_tokens, ssh_privkey))]
+#[instrument(skip(cancellation_tokens, ssh_launch_opts))]
 pub async fn connect_ssh(
     cancellation_tokens: CancellationTokens,
-    ssh_privkey: String,
-    ssh_timeout: Duration,
-    cid: u32,
-    env: Vec<EnvVar>,
-    args: Vec<String>,
+    ssh_launch_opts: SshLaunchOpts,
 ) -> Result<()> {
-    let privkey = PrivateKey::from_openssh(ssh_privkey)?;
+    let privkey = PrivateKey::from_openssh(ssh_launch_opts.privkey)?;
 
     // Session is a wrapper around a russh client, defined down below
-    let mut ssh = Session::connect(privkey, cid, 22, ssh_timeout)
+    let mut ssh = Session::connect(privkey, ssh_launch_opts.cid, 22, ssh_launch_opts.timeout)
         .await
         .inspect_err(|_| {
             cancellation_tokens.qemu.cancel();
@@ -284,7 +289,8 @@ pub async fn connect_ssh(
         // display the output of interactive applications correctly
         let _raw_term = std::io::stdout().into_raw_mode()?;
 
-        let escaped_args = &args
+        let escaped_args = &ssh_launch_opts
+            .args
             .into_iter()
             .map(|x| shell_escape::escape(x.into())) // arguments are escaped manually since the SSH protocol doesn't support quoting
             .collect::<Vec<_>>()
@@ -294,7 +300,7 @@ pub async fn connect_ssh(
                 debug!("SSH task was cancelled");
                 return Ok(())
             }
-            val = ssh.call(env, escaped_args) => {
+            val = ssh.call(ssh_launch_opts.env_vars, escaped_args) => {
                 val
             }
         };

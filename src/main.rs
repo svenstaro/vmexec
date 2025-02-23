@@ -1,23 +1,20 @@
-use std::path::PathBuf;
-
 use clap::{crate_name, CommandFactory, Parser};
-use color_eyre::eyre::{bail, Context, OptionExt, Result};
+use color_eyre::eyre::{Context, OptionExt, Result};
 use directories::ProjectDirs;
+use qemu::create_overlay_image;
 use tempfile::TempDir;
-use tokio::process::Command;
-use tokio::task::JoinSet;
-use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, Level};
 
 mod cli;
 mod qemu;
+mod runner;
 mod ssh;
 mod utils;
 mod vm_images;
 
-use crate::qemu::{create_overlay_image, launch_qemu};
-use crate::ssh::{connect_ssh, create_ssh_key};
-use crate::utils::create_free_cid;
+use crate::runner::run_command;
+use crate::ssh::create_ssh_key;
+use crate::utils::{create_free_cid, find_required_tools};
 use crate::vm_images::ensure_archlinux_image;
 
 fn install_tracing(log_level: Level) {
@@ -33,52 +30,6 @@ fn install_tracing(log_level: Level) {
         .with(fmt_layer)
         .with(ErrorLayer::default())
         .init();
-}
-
-#[derive(Debug)]
-pub struct ExecutablePaths {
-    pub qemu_path: PathBuf,
-    pub virtiofsd_path: PathBuf,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct CancellationTokens {
-    pub qemu: CancellationToken,
-    pub ssh: CancellationToken,
-}
-
-/// Check whether necessary tools are installed and return their paths
-async fn find_required_tools() -> Result<ExecutablePaths> {
-    // Find QEMUU
-    let qemu_path = which::which_global("qemu-system-x86_64")
-        .wrap_err("Couldn't find qemu-system-x86_64 in PATH")?;
-
-    // Find virtiofsd
-    let virtiofsd_path = which::which_in("virtiofsd", Some("/usr/lib:/usr/libexec"), "/")
-        .wrap_err("Couldn't find virtiofsd in /usr/lib or /usr/libexec")?;
-
-    // Check whether unshare is working as expected
-    let unshare_output = Command::new("unshare")
-        .arg("-r")
-        .arg("id")
-        .kill_on_drop(true)
-        .output()
-        .await?;
-    let unshare_stdout = std::str::from_utf8(&unshare_output.stdout)?;
-    let unshare_stderr = std::str::from_utf8(&unshare_output.stderr)?;
-    if !unshare_output.status.success() {
-        bail!(
-            "Test command 'unshare -r id' didn't exit succesfully, stdout: {unshare_stdout}, stderr: {unshare_stderr}"
-        );
-    }
-    if !unshare_stdout.starts_with("uid=0(root) gid=0(root) groups=0(root)") {
-        bail!("Expected output to start with 'unshare -r id' to report 'uid=0(root) gid=0(root) groups=0(root)' but got: {unshare_stdout}");
-    }
-
-    Ok(ExecutablePaths {
-        qemu_path,
-        virtiofsd_path,
-    })
 }
 
 #[tokio::main]
@@ -139,52 +90,33 @@ async fn main() -> Result<()> {
     };
 
     let ssh_keypair = create_ssh_key(run_data_dir.path()).await?;
+
     let overlay_image = create_overlay_image(run_data_dir.path(), &image).await?;
     let qemu_launch_opts = qemu::QemuLaunchOpts {
         volumes: cli.volumes,
-        overlay_image,
+        image: overlay_image,
         show_vm_window: cli.show_vm_window,
-        ssh_pubkey: ssh_keypair.pubkey_str,
+        pubkey: ssh_keypair.pubkey_str,
+        cid,
+    };
+
+    let ssh_launch_opts = ssh::SshLaunchOpts {
+        timeout: cli.ssh_timeout,
+        env_vars: cli.env,
+        args: cli.args,
+        privkey: ssh_keypair.privkey_str,
         cid,
     };
 
     debug!("SSH command for manual debugging:");
     debug!("ssh root@vsock/{cid} -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
-
-    let cancellatation_tokens = CancellationTokens::default();
-
-    let mut joinset = JoinSet::new();
-
-    joinset.spawn({
-        let cancellatation_tokens_ = cancellatation_tokens.clone();
-        async move {
-            launch_qemu(
-                cancellatation_tokens_,
-                run_data_dir.path(),
-                tool_paths,
-                qemu_launch_opts,
-            )
-            .await
-        }
-    });
-    joinset.spawn({
-        let cancellatation_tokens_ = cancellatation_tokens.clone();
-        async move {
-            connect_ssh(
-                cancellatation_tokens_,
-                ssh_keypair.privkey_str,
-                cli.ssh_timeout,
-                cid,
-                cli.env,
-                cli.args,
-            )
-            .await
-        }
-    });
-
-    while let Some(res) = joinset.join_next().await {
-        res??
-    }
+    run_command(
+        run_data_dir.path(),
+        tool_paths,
+        qemu_launch_opts,
+        ssh_launch_opts,
+    )
+    .await?;
 
     Ok(())
 }

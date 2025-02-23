@@ -195,6 +195,7 @@ pub async fn ensure_archlinux_image(cache_dir: &Path, pull: Pull) -> Result<Path
         debug!("Didn't find requested image locally, proceeding to download");
     }
 
+    // Since we got to this point we'll need to download the image here.
     download_archlinux_image(
         &local_image_path,
         &local_image_checksum_path,

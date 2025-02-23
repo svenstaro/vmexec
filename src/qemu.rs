@@ -13,7 +13,7 @@ use tokio::{
 };
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::{cli::BindMount, CancellationTokens, ExecutablePaths};
+use crate::{cli::BindMount, runner::CancellationTokens, utils::ExecutablePaths};
 
 /// Get the full command that would be run
 pub fn full_cmd(cmd: &Command) -> String {
@@ -158,9 +158,9 @@ pub async fn launch_virtiofsd(
 #[derive(Debug, Clone)]
 pub struct QemuLaunchOpts {
     pub volumes: Vec<BindMount>,
-    pub overlay_image: PathBuf,
+    pub image: PathBuf,
     pub show_vm_window: bool,
-    pub ssh_pubkey: String,
+    pub pubkey: String,
     pub cid: u32,
 }
 
@@ -175,7 +175,7 @@ pub async fn launch_qemu(
     let ovmf_vars_system_path = Path::new("/usr/share/edk2/x64/OVMF_VARS.4m.fd");
     let ovmf_vars = convert_ovmf_uefi_variables(run_data_dir, ovmf_vars_system_path).await?;
 
-    let overlay_image_str = qemu_launch_opts.overlay_image.to_string_lossy();
+    let overlay_image_str = qemu_launch_opts.image.to_string_lossy();
     let ovmf_vars_str = ovmf_vars.to_string_lossy();
 
     let sysinfo_system = sysinfo::System::new_with_specifics(
@@ -186,7 +186,7 @@ pub async fn launch_qemu(
     let memory = sysinfo_system.total_memory() / 1024 / 1024 / 1024;
     let logical_core_count = sysinfo_system.cpus().len();
 
-    let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.ssh_pubkey.as_bytes());
+    let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.pubkey.as_bytes());
 
     let sshd_dropin = "[Service]\nExecStart=\nExecStart=/usr/bin/sshd -D -o 'AcceptEnv *'\n";
     let sshd_dropin_base64 = Base64::encode_string(sshd_dropin.as_bytes());
