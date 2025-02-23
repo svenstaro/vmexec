@@ -41,7 +41,7 @@ pub struct ExecutablePaths {
     pub virtiofsd_path: PathBuf,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CancellationTokens {
     pub qemu: CancellationToken,
     pub ssh: CancellationToken,
@@ -135,7 +135,7 @@ async fn main() -> Result<()> {
     debug!("run data dir is: {:?}", run_data_dir.path());
 
     // We need a free CID for host-guest communication via vsock.
-    let cid = create_free_cid(&data_dir, run_data_dir.path()).await?;
+    let cid = create_free_cid(data_dir, run_data_dir.path()).await?;
 
     let image = if let Some(os) = cli.image_source.os {
         match os {

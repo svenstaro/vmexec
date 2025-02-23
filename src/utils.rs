@@ -86,8 +86,7 @@ pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32
         // Get the next CID.
         cids.sort();
         let cid = if let Some(last_cid) = cids.iter().next_back() {
-            let next_cid = last_cid + 1;
-            next_cid
+            last_cid + 1
         } else {
             // We get here if the current list of CIDs is empty. So we'll just start with some
             // arbitrary CID.
@@ -100,5 +99,5 @@ pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32
     })
     .await?;
 
-    Ok(cid?)
+    cid
 }

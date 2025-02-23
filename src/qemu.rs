@@ -258,7 +258,7 @@ pub async fn launch_qemu(
         let tag = vol.tag();
         let dest_path = vol.dest.to_string_lossy();
         let read_only = if vol.read_only {
-            format!(",ro")
+            String::from(",ro")
         } else {
             String::new()
         };
