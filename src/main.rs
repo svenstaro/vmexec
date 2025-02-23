@@ -47,15 +47,6 @@ pub struct CancellationTokens {
     pub ssh: CancellationToken,
 }
 
-impl CancellationTokens {
-    pub fn new() -> Self {
-        Self {
-            qemu: CancellationToken::new(),
-            ssh: CancellationToken::new(),
-        }
-    }
-}
-
 /// Check whether necessary tools are installed and return their paths
 async fn find_required_tools() -> Result<ExecutablePaths> {
     // Find QEMUU
@@ -160,7 +151,7 @@ async fn main() -> Result<()> {
     debug!("SSH command for manual debugging:");
     debug!("ssh root@vsock/{cid} -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
 
-    let cancellatation_tokens = CancellationTokens::new();
+    let cancellatation_tokens = CancellationTokens::default();
 
     let mut joinset = JoinSet::new();
 
