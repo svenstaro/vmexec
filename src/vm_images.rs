@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{bail, Context, OptionExt, Result};
+use color_eyre::eyre::{bail, eyre, Context, OptionExt, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use rattler_digest::{compute_file_digest, Sha256};
 use tokio::{
@@ -12,9 +12,68 @@ use url::Url;
 
 use crate::cli::Pull;
 
+/// Retrieve the latest locally available Arch Linux image
+pub async fn get_latest_local_archlinux_image(distro_image_dir: &Path) -> Result<Option<PathBuf>> {
+    let mut images = vec![];
+
+    // First we'll gather a list of all local images.
+    let mut entries = fs::read_dir(distro_image_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        if let Some(ext) = entry.path().extension() {
+            let filename = entry
+                .file_name()
+                .into_string()
+                .map_err(|e| eyre!("Filename invalid somehow: {e:?}"))?;
+            if entry.file_type().await?.is_file()
+                && filename.starts_with("Arch-Linux")
+                && ext == "qcow2"
+            {
+                images.push(entry.path());
+            }
+        }
+    }
+
+    // Sort the images by name as the Arch Linux images contain the ISO date so that the latest one
+    // will be the one at the very end.
+    images.sort();
+
+    let latest_image = images.last().cloned();
+    Ok(latest_image)
+}
+
 /// Download the most recent Arch Linux image
 #[instrument]
-pub async fn download_archlinux(pull: Pull, dir: &Path) -> Result<PathBuf> {
+pub async fn ensure_archlinux_image(cache_dir: &Path, pull: Pull) -> Result<PathBuf> {
+    let distro_image_dir = cache_dir.join("images").join("archlinux");
+    if !distro_image_dir.exists() {
+        debug!("Distro image dir {distro_image_dir:?} doesn't exist yet, creating");
+        std::fs::create_dir_all(&distro_image_dir)
+            .wrap_err(format!("Creating distro image dir {distro_image_dir:?}"))?;
+    }
+
+    let latest_local_image = get_latest_local_archlinux_image(&distro_image_dir).await?;
+
+    // If --pull missing was provided and if there is already a local image (no matter the age),
+    // we'll just return that. If there's no image we'll do nothing which will cause it to be
+    // downloaded later in the function.
+    if pull == Pull::Missing {
+        if let Some(latest) = latest_local_image {
+            return Ok(latest);
+        }
+    }
+
+    // If --pull missing was provided and if there is already a local image (no matter the age),
+    // we'll just return that. If there's no image we'll error out.
+    if pull == Pull::Never {
+        if let Some(latest) = latest_local_image {
+            return Ok(latest);
+        } else {
+            bail!("No local image found and `--pull never` selected, bailing");
+        }
+    }
+
+    debug!("Latest local image is {latest_local_image:?}");
+
     let arch_boxes_base_url = Url::parse(
         "https://gitlab.archlinux.org/archlinux/arch-boxes/-/jobs/artifacts/master/raw/",
     )?;
@@ -42,7 +101,7 @@ pub async fn download_archlinux(pull: Pull, dir: &Path) -> Result<PathBuf> {
     debug!("Latest remote image is: {image_name}");
 
     // The file will be downloaded to this path.
-    let local_image_path = dir.join(&image_name);
+    let local_image_path = distro_image_dir.join(&image_name);
 
     let image_ext = local_image_path
         .extension()
@@ -55,11 +114,8 @@ pub async fn download_archlinux(pull: Pull, dir: &Path) -> Result<PathBuf> {
     if local_image_path.exists() && local_image_checksum_path.exists() {
         debug!("Found pre-existing files for image, skipping download");
         return Ok(local_image_path);
-    } else {
-        match pull {
-            Pull::Never => bail!("Image not found locally and pull option never chosen"),
-            Pull::Newer => debug!("Didn't find requested image locally, proceeding to download"),
-        }
+    } else if pull == Pull::Newer {
+        debug!("Didn't find requested image locally, proceeding to download");
     }
 
     let image_url = arch_boxes_base_url.join(&format!("output/{image_name}?job=build:secure"))?;

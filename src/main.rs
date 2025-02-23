@@ -18,7 +18,7 @@ mod vm_images;
 use crate::qemu::{create_overlay_image, launch_qemu};
 use crate::ssh::{connect_ssh, create_ssh_key};
 use crate::utils::create_free_cid;
-use crate::vm_images::download_archlinux;
+use crate::vm_images::ensure_archlinux_image;
 
 fn install_tracing(log_level: Level) {
     use tracing_error::ErrorLayer;
@@ -139,7 +139,7 @@ async fn main() -> Result<()> {
 
     let image = if let Some(os) = cli.image_source.os {
         match os {
-            cli::OsType::Archlinux => download_archlinux(cli.pull, cache_dir).await?,
+            cli::OsType::Archlinux => ensure_archlinux_image(cache_dir, cli.pull).await?,
         }
     } else if let Some(image) = cli.image_source.image {
         image

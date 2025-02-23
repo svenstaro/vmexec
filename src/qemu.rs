@@ -8,7 +8,7 @@ use base64ct::{Base64, Encoding};
 use color_eyre::eyre::{bail, Context, Result};
 use rustix::{fs::IFlags, io::Errno, path::Arg};
 use tokio::{
-    fs::{self, File},
+    fs::File,
     process::{Child, Command},
 };
 use tracing::{debug, error, info, instrument, trace};

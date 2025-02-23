@@ -113,8 +113,9 @@ impl FromStr for BindMount {
     }
 }
 
-#[derive(Clone, Debug, ValueEnum)]
+#[derive(Clone, Debug, PartialEq, ValueEnum)]
 pub enum Pull {
+    Missing,
     Never,
     Newer,
 }
@@ -186,7 +187,7 @@ pub struct Cli {
     pub show_vm_window: bool,
 
     /// When to pull a new image
-    #[arg(long, default_value = "newer")]
+    #[arg(long, default_value = "missing")]
     pub pull: Pull,
 
     /// Arguments to run in the virtual machine
