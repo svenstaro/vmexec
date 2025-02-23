@@ -39,7 +39,7 @@ pub async fn download_archlinux(pull: Pull, dir: &Path) -> Result<PathBuf> {
 
     let image_name = format!("Arch-Linux-x86_64-libvirt-executor-{build_version}.qcow2");
 
-    debug!("Most recent image is: {image_name}");
+    debug!("Latest remote image is: {image_name}");
 
     // The file will be downloaded to this path.
     let local_image_path = dir.join(&image_name);

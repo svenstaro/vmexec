@@ -118,13 +118,13 @@ async fn main() -> Result<()> {
     let project_dir = ProjectDirs::from("", "", "vmexec").ok_or_eyre("Couldn't get project dir")?;
     let cache_dir = project_dir.cache_dir();
     if !cache_dir.exists() {
-        debug!("Cache dir {cache_dir:?} didn't exist yet, creating");
+        debug!("Cache dir {cache_dir:?} doesn't exist yet, creating");
         std::fs::create_dir_all(cache_dir).wrap_err(format!("Creating cache dir {cache_dir:?}"))?;
     }
 
     let data_dir = project_dir.data_dir();
     if !data_dir.exists() {
-        debug!("Data dir {data_dir:?} didn't exist yet, creating");
+        debug!("Data dir {data_dir:?} doesn't exist yet, creating");
         std::fs::create_dir_all(data_dir).wrap_err(format!("Creating data dir {data_dir:?}"))?;
     }
 
@@ -134,7 +134,7 @@ async fn main() -> Result<()> {
         .wrap_err("Couldn't make temp dir in {data_dir}")?;
     debug!("run data dir is: {:?}", run_data_dir.path());
 
-    // We need a free CID for host-guest communication.
+    // We need a free CID for host-guest communication via vsock.
     let cid = create_free_cid(&data_dir, run_data_dir.path()).await?;
 
     let image = if let Some(os) = cli.image_source.os {

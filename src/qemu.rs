@@ -97,7 +97,7 @@ pub async fn create_overlay_image(run_data_dir: &Path, source_image: &Path) -> R
     let qemu_img_output = qemu_img_cmd.output().await?;
     if !qemu_img_output.status.success() {
         bail!(
-            "qemu-img failed: {}",
+            "qemu-img create failed: {}",
             String::from_utf8_lossy(&qemu_img_output.stderr)
         );
     }
