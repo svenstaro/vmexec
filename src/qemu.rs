@@ -27,6 +27,40 @@ pub fn full_cmd(cmd: &Command) -> String {
     format!("{program_str} {args_str}")
 }
 
+/// Convert OVMF UEFI variables raw image to qcow2
+///
+/// We need it to be qcow2 so that snapshotting will work. We don't particularly want to snaphot
+/// the UEFI variables, however, snapshotting the VM only works if all its writeable disks support
+/// it so here we are.
+#[instrument]
+pub async fn convert_ovmf_uefi_variables(
+    run_data_dir: &Path,
+    source_image: &Path,
+) -> Result<PathBuf> {
+    let output_file = run_data_dir.join("OVMF_VARS.4m.fd.qcow2");
+
+    let mut qemu_img_cmd = Command::new("qemu-img");
+    qemu_img_cmd
+        .arg("convert")
+        .args(["-O", "qcow2"])
+        .arg(source_image)
+        .arg(&output_file);
+
+    let qemu_img_cmd_str = full_cmd(&qemu_img_cmd);
+    info!("Converting OVMF UEFI vars file to qcow2");
+    debug!("{qemu_img_cmd_str}");
+
+    let qemu_img_output = qemu_img_cmd.output().await?;
+    if !qemu_img_output.status.success() {
+        bail!(
+            "qemu-img convert failed: {}",
+            String::from_utf8_lossy(&qemu_img_output.stderr)
+        );
+    }
+
+    Ok(output_file)
+}
+
 /// Create an overlay image based on a source image
 #[instrument]
 pub async fn create_overlay_image(run_data_dir: &Path, source_image: &Path) -> Result<PathBuf> {
@@ -138,8 +172,8 @@ pub async fn launch_qemu(
     tool_paths: ExecutablePaths,
     qemu_launch_opts: QemuLaunchOpts,
 ) -> Result<()> {
-    let ovmf_vars = run_data_dir.join("OVMF_VARS.4m.fd");
-    fs::copy("/usr/share/edk2/x64/OVMF_VARS.4m.fd", &ovmf_vars).await?;
+    let ovmf_vars_system_path = Path::new("/usr/share/edk2/x64/OVMF_VARS.4m.fd");
+    let ovmf_vars = convert_ovmf_uefi_variables(run_data_dir, ovmf_vars_system_path).await?;
 
     let overlay_image_str = qemu_launch_opts.overlay_image.to_string_lossy();
     let ovmf_vars_str = ovmf_vars.to_string_lossy();
@@ -188,7 +222,7 @@ pub async fn launch_qemu(
         ])
         .args([
             "-drive",
-            &format!("if=pflash,format=raw,unit=1,file={ovmf_vars_str}"),
+            &format!("if=pflash,format=qcow2,unit=1,file={ovmf_vars_str}"),
         ])
 
         // Overlay image
