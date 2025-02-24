@@ -103,7 +103,7 @@ pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32
     cid
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ExecutablePaths {
     pub qemu_path: PathBuf,
     pub virtiofsd_path: PathBuf,
