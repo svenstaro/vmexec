@@ -268,9 +268,9 @@ impl Session {
     }
 }
 
-/// Connect SSH
+/// Connect SSH and run an interactive session
 #[instrument(skip(cancellation_tokens, ssh_launch_opts))]
-pub async fn connect_ssh(
+pub async fn connect_ssh_interactive(
     cancellation_tokens: CancellationTokens,
     ssh_launch_opts: SshLaunchOpts,
 ) -> Result<()> {
@@ -310,6 +310,30 @@ pub async fn connect_ssh(
 
     info!("Exit code: {:?}", code);
     cancellation_tokens.qemu.cancel();
+    ssh.close().await?;
+    Ok(())
+}
+
+/// Connect SSH and run a commnad
+#[instrument(skip(ssh_launch_opts))]
+pub async fn connect_ssh(ssh_launch_opts: SshLaunchOpts) -> Result<()> {
+    let privkey = PrivateKey::from_openssh(ssh_launch_opts.privkey)?;
+
+    // Session is a wrapper around a russh client, defined down below
+    let mut ssh =
+        Session::connect(privkey, ssh_launch_opts.cid, 22, ssh_launch_opts.timeout).await?;
+    info!("Connected");
+
+    let code = {
+        // We're using `termion` to put the terminal into raw mode, so that we can
+        // display the output of interactive applications correctly
+        let _raw_term = std::io::stdout().into_raw_mode()?;
+
+        let ssh_output = ssh.call(vec![], "echo hello").await?;
+        ssh_output
+    };
+
+    info!("Exit code: {:?}", code);
     ssh.close().await?;
     Ok(())
 }

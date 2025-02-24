@@ -1,7 +1,6 @@
 use clap::{crate_name, CommandFactory, Parser};
 use color_eyre::eyre::{Context, OptionExt, Result};
 use directories::ProjectDirs;
-use qemu::create_overlay_image;
 use tempfile::TempDir;
 use tracing::{debug, instrument, Level};
 
@@ -12,7 +11,7 @@ mod ssh;
 mod utils;
 mod vm_images;
 
-use crate::runner::run_command;
+use crate::runner::{run_command, run_warmup};
 use crate::ssh::create_ssh_key;
 use crate::utils::{create_free_cid, find_required_tools};
 use crate::vm_images::ensure_archlinux_image;
@@ -91,10 +90,9 @@ async fn main() -> Result<()> {
 
     let ssh_keypair = create_ssh_key(run_data_dir.path()).await?;
 
-    let overlay_image = create_overlay_image(run_data_dir.path(), &image).await?;
     let qemu_launch_opts = qemu::QemuLaunchOpts {
         volumes: cli.volumes,
-        image: overlay_image,
+        image,
         show_vm_window: cli.show_vm_window,
         pubkey: ssh_keypair.pubkey_str,
         cid,
@@ -108,15 +106,23 @@ async fn main() -> Result<()> {
         cid,
     };
 
-    debug!("SSH command for manual debugging:");
-    debug!("ssh root@vsock/{cid} -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
-    run_command(
+    run_warmup(
         run_data_dir.path(),
         tool_paths,
         qemu_launch_opts,
         ssh_launch_opts,
     )
     .await?;
+
+    //debug!("SSH command for manual debugging:");
+    //debug!("ssh root@vsock/{cid} -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
+    //run_command(
+    //    run_data_dir.path(),
+    //    tool_paths,
+    //    qemu_launch_opts,
+    //    ssh_launch_opts,
+    //)
+    //.await?;
 
     Ok(())
 }

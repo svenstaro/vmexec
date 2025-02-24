@@ -5,12 +5,8 @@ use std::{
 };
 
 use base64ct::{Base64, Encoding};
-use color_eyre::eyre::{bail, Context, Result};
-use rustix::{fs::IFlags, io::Errno, path::Arg};
-use tokio::{
-    fs::File,
-    process::{Child, Command},
-};
+use color_eyre::eyre::{bail, Result};
+use tokio::process::{Child, Command};
 use tracing::{debug, error, info, instrument, trace};
 
 use crate::{cli::BindMount, runner::CancellationTokens, utils::ExecutablePaths};
@@ -63,26 +59,11 @@ pub async fn convert_ovmf_uefi_variables(
 
 /// Create an overlay image based on a source image
 #[instrument]
-pub async fn create_overlay_image(run_data_dir: &Path, source_image: &Path) -> Result<PathBuf> {
-    let overlay_image = run_data_dir.join("overlay.qcow2");
-
-    // Touch the file so that it exists.
-    let overlay_image_fd = File::create(&overlay_image)
-        .await
-        .wrap_err("Could't create overlay image")?;
-
-    // Turn off copy-on-write in case the filesystem supports it.
-    // This is useful in case this is using a COW-enabled backing filesystem as it will provide no
-    // benefit to us here and it will only slow the VM down.
-    if let Err(e) = rustix::fs::ioctl_setflags(overlay_image_fd, IFlags::NOCOW) {
-        // We'll ignore the error in case it's not supported on the filesystem.
-        if e != Errno::NOTSUP {
-            return Err(e.into());
-        }
-    }
+pub async fn create_overlay_image(source_image: &Path, overlay_image: &Path) -> Result<()> {
+    let overlay_image = source_image.with_extension("overlay.qcow2");
 
     let source_image_str = source_image.to_string_lossy();
-    let backing_file = format!("backing_file={source_image_str},backing_fmt=qcow2");
+    let backing_file = format!("backing_file={source_image_str},backing_fmt=qcow2,nocow=on");
     let mut qemu_img_cmd = Command::new("qemu-img");
     qemu_img_cmd
         .arg("create")
@@ -102,7 +83,7 @@ pub async fn create_overlay_image(run_data_dir: &Path, source_image: &Path) -> R
         );
     }
 
-    Ok(overlay_image)
+    Ok(())
 }
 
 /// Launch an instance of virtiofsd for a particular volume
@@ -119,8 +100,8 @@ pub async fn launch_virtiofsd(
         .arg("--map-auto")
         .arg("--")
         .arg(virtiofsd_path)
-        .args(["--shared-dir", volume.source.as_str()?])
-        .args(["--socket-path", socket_path.as_str()?])
+        .args(["--shared-dir", &volume.source.to_string_lossy()])
+        .args(["--socket-path", &socket_path.to_string_lossy()])
         .args(["--sandbox", "chroot"]);
 
     if volume.read_only {
@@ -148,7 +129,7 @@ pub async fn launch_virtiofsd(
         _ = virtiofsd_child.wait() => {
             error!("virtiofsd process exited early, that's usually a bad sign");
             let virtiofsd_output = virtiofsd_child.wait_with_output().await?;
-            bail!("virtiofsd failed: {}", virtiofsd_output.stderr.to_string_lossy());
+            bail!("virtiofsd failed: {}", String::from_utf8(virtiofsd_output.stderr)?);
         }
     }
 
@@ -165,7 +146,7 @@ pub struct QemuLaunchOpts {
 }
 
 /// Launch QEMU
-#[instrument(skip(cancellation_tokens, tool_paths, qemu_launch_opts,))]
+#[instrument(skip(cancellation_tokens, tool_paths, qemu_launch_opts))]
 pub async fn launch_qemu(
     cancellation_tokens: CancellationTokens,
     run_data_dir: &Path,
@@ -192,6 +173,9 @@ pub async fn launch_qemu(
     let sshd_dropin_base64 = Base64::encode_string(sshd_dropin.as_bytes());
     let cid = qemu_launch_opts.cid;
 
+    let qmp_socket_path = run_data_dir.join("qmp.sock,server,wait=off");
+    let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
+
     let mut qemu_cmd = Command::new(tool_paths.qemu_path);
     qemu_cmd
         .args(["-accel", "kvm"])
@@ -212,7 +196,7 @@ pub async fn launch_qemu(
 
         // Memory configuration
         .args(["-m", &format!("{memory}G")])
-        .args(["-object", &format!("memory-backend-memfd,id=mem,size={memory}G,share=on")])
+        .args(["-object", &format!("memory-backend-memfd,id=mem,merge=on,size={memory}G,share=on")])
         .args(["-numa", "node,memdev=mem"])
 
         // UEFI
@@ -226,7 +210,10 @@ pub async fn launch_qemu(
         ])
 
         // Overlay image
-        .args(["-drive", &format!("if=virtio,file={overlay_image_str}")])
+        .args(["-drive", &format!("if=virtio,node-name=overlay-disk,file={overlay_image_str}")])
+
+        // QMP API to expose QEMU command API
+        .args(["-qmp", &format!("unix:{qmp_socket_path_str}")])
 
         // Here we inject the SSH using systemd.system-credentials, see:
         // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
@@ -246,38 +233,38 @@ pub async fn launch_qemu(
         ]);
 
     // Directory sharing
-    let mut virtiofsd_handles = vec![];
-    for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
-        let virtiofsd_child = launch_virtiofsd(&tool_paths.virtiofsd_path, run_data_dir, vol)
-            .await
-            .wrap_err(format!("Failed to launch virtiofsd for {vol}"))?;
-        virtiofsd_handles.push(virtiofsd_child);
-
-        let socket_path = run_data_dir.join(vol.socket_name());
-        let socket_path_str = socket_path.as_str()?;
-        let tag = vol.tag();
-        let dest_path = vol.dest.to_string_lossy();
-        let read_only = if vol.read_only {
-            String::from(",ro")
-        } else {
-            String::new()
-        };
-        let fstab = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
-        let fstab_base64 = Base64::encode_string(fstab.as_bytes());
-        qemu_cmd
-            .args([
-                "-chardev",
-                &format!("socket,id=char{i},path={socket_path_str}"),
-            ])
-            .args([
-                "-device",
-                &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
-            ])
-            .args([
-                "-smbios",
-                &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
-            ]);
-    }
+    //let mut virtiofsd_handles = vec![];
+    //for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
+    //    let virtiofsd_child = launch_virtiofsd(&tool_paths.virtiofsd_path, run_data_dir, vol)
+    //        .await
+    //        .wrap_err(format!("Failed to launch virtiofsd for {vol}"))?;
+    //    virtiofsd_handles.push(virtiofsd_child);
+    //
+    //    let socket_path = run_data_dir.join(vol.socket_name());
+    //    let socket_path_str = socket_path.to_string_lossy();
+    //    let tag = vol.tag();
+    //    let dest_path = vol.dest.to_string_lossy();
+    //    let read_only = if vol.read_only {
+    //        String::from(",ro")
+    //    } else {
+    //        String::new()
+    //    };
+    //    let fstab = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
+    //    let fstab_base64 = Base64::encode_string(fstab.as_bytes());
+    //    qemu_cmd
+    //        .args([
+    //            "-chardev",
+    //            &format!("socket,id=char{i},path={socket_path_str}"),
+    //        ])
+    //        .args([
+    //            "-device",
+    //            &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
+    //        ])
+    //        .args([
+    //            "-smbios",
+    //            &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
+    //        ]);
+    //}
 
     if !qemu_launch_opts.show_vm_window {
         qemu_cmd.arg("-nographic");
@@ -306,7 +293,7 @@ pub async fn launch_qemu(
     };
 
     if !qemu_output.status.success() {
-        error!("QEMU failed: {}", qemu_output.stderr.to_string_lossy());
+        error!("QEMU failed: {}", String::from_utf8(qemu_output.stderr)?);
         cancellation_tokens.ssh.cancel();
     }
 
