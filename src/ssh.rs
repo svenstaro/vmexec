@@ -1,12 +1,12 @@
 use std::fmt::Debug;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{env, os::unix::fs::PermissionsExt, path::Path, sync::Arc, time::Duration};
 
 use base64ct::LineEnding;
 use color_eyre::eyre::{Result, bail};
-use russh::keys::ssh_key::private::Ed25519Keypair;
-use russh::keys::ssh_key::rand_core::OsRng;
+use russh::keys::ssh_key::{private::Ed25519Keypair, rand_core::OsRng};
 use russh::keys::{PrivateKey, PublicKey};
 use russh::{ChannelMsg, Disconnect, keys::key::PrivateKeyWithHashAlg};
 use termion::raw::IntoRawMode;
@@ -347,8 +347,15 @@ pub async fn connect_ssh_interactive(
 
 /// Connect SSH and run a command that checks whether the system is ready for operation and then
 /// shuts down.
+///
+/// The `qemu_should_exit` is used to tell the QEMU process to wait for process completion once
+/// we've told the VM to shutdown. We then wait on the receiver `qemu_has_exited_rx` to know when
+/// QEMU has actually exited according to the handler.
 #[instrument(skip(ssh_launch_opts))]
-pub async fn connect_ssh_for_warmup(ssh_launch_opts: SshLaunchOpts) -> Result<()> {
+pub async fn connect_ssh_for_warmup(
+    qemu_should_exit: Arc<AtomicBool>,
+    ssh_launch_opts: SshLaunchOpts,
+) -> Result<()> {
     let privkey = PrivateKey::from_openssh(ssh_launch_opts.privkey)?;
 
     // Session is a wrapper around a russh client, defined down below
@@ -372,6 +379,11 @@ pub async fn connect_ssh_for_warmup(ssh_launch_opts: SshLaunchOpts) -> Result<()
     ssh.call(vec![], "systemctl poweroff").await?;
     debug!("Shutting down system");
 
-    ssh.close().await?;
+    // Tell the QEMU handler it's now fine to wait for exit.
+    qemu_should_exit.store(true, Ordering::SeqCst);
+
+    // Ignore whatever error we might get from this as we want to close the connection at this
+    // point anyway.
+    let _ = ssh.close().await;
     Ok(())
 }

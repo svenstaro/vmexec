@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, atomic::AtomicBool},
+};
 
 use color_eyre::eyre::{Context, Result};
 use tokio::task::JoinSet;
@@ -61,26 +64,32 @@ pub async fn run_warmup(
         ..qemu_launch_opts.clone()
     };
 
+    // In case of the warmup, we'll poweroff the VM at some point. From that point on, QEMU is
+    // expected to exit. If QEMU exit at any other point, it's probably some kind of error.
+    // These channels allow us to signal that.
+    let qemu_should_exit = Arc::new(AtomicBool::new(false));
+
     let cancellatation_tokens = CancellationTokens::default();
     let mut joinset = JoinSet::new();
     joinset.spawn({
-        let run_data_dir = run_dir.to_owned();
+        let qemu_should_exit = qemu_should_exit.clone();
+        let run_dir = run_dir.to_owned();
         let cancellatation_tokens_ = cancellatation_tokens.clone();
         async move {
             launch_qemu(
                 cancellatation_tokens_,
-                run_data_dir.as_path(),
+                qemu_should_exit,
+                run_dir.as_path(),
                 tool_paths,
                 qemu_launch_opts,
             )
             .await
         }
     });
-    connect_ssh_for_warmup(ssh_launch_opts)
+    connect_ssh_for_warmup(qemu_should_exit, ssh_launch_opts)
         .await
         .wrap_err("SSH connection error")?;
 
-    cancellatation_tokens.qemu.cancel();
     while let Some(res) = joinset.join_next().await {
         res??
     }
@@ -91,26 +100,20 @@ pub async fn run_warmup(
 /// Run a user-supplied command in a throw-away VM
 #[instrument]
 pub async fn run_command(
-    run_data_dir: &Path,
+    run_dir: &Path,
     tool_paths: ExecutablePaths,
     qemu_launch_opts: QemuLaunchOpts,
     ssh_launch_opts: SshLaunchOpts,
 ) -> Result<()> {
-    //create_overlay_image(&qemu_launch_opts.image_path, &overlay_image_path).await?;
-
-    //let qemu_launch_opts = QemuLaunchOpts {
-    //    image_path: overlay_image,
-    //    ..qemu_launch_opts
-    //};
-
     let cancellatation_tokens = CancellationTokens::default();
     let mut joinset = JoinSet::new();
     joinset.spawn({
-        let run_data_dir = run_data_dir.to_owned();
+        let run_data_dir = run_dir.to_owned();
         let cancellatation_tokens_ = cancellatation_tokens.clone();
         async move {
             launch_qemu(
                 cancellatation_tokens_,
+                Arc::new(AtomicBool::new(false)),
                 run_data_dir.as_path(),
                 tool_paths,
                 qemu_launch_opts,

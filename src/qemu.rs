@@ -1,6 +1,10 @@
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -160,6 +164,7 @@ pub struct QemuLaunchOpts {
 #[instrument(skip(cancellation_tokens, tool_paths, qemu_launch_opts))]
 pub async fn launch_qemu(
     cancellation_tokens: CancellationTokens,
+    qemu_should_exit: Arc<AtomicBool>,
     run_dir: &Path,
     tool_paths: ExecutablePaths,
     qemu_launch_opts: QemuLaunchOpts,
@@ -301,6 +306,10 @@ pub async fn launch_qemu(
             return Ok(());
         }
         val = qemu_child.wait_with_output() => {
+            if qemu_should_exit.load(Ordering::SeqCst) {
+                info!("QEMU has finished running");
+                return Ok(());
+            }
             error!("QEMU process exited early, that's usually a bad sign");
             val?
         }
