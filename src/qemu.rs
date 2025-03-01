@@ -234,10 +234,7 @@ pub async fn launch_qemu(
         .args(["-device", &format!("vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid={cid}")])
 
         // Network controller
-        // TODO In theory this should be faster but I noticed that it actually takes quite a bit
-        // longer to connect.
-        //.args(["-nic", "user,model=virtio"])
-        //.args(["-net", "nic,model=virtio"])
+        .args(["-nic", "user,model=virtio"])
 
         // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
         .args(["-device", "virtio-balloon,free-page-reporting=on"])
