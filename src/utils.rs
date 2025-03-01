@@ -2,13 +2,25 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{fs, io::ErrorKind};
 
-use color_eyre::eyre::{bail, Context};
-use color_eyre::{eyre::Error, Result};
+use color_eyre::eyre::{Context, bail};
+use color_eyre::{Result, eyre::Error};
 use pidfile::PidFile;
+use tokio::fs::create_dir_all;
 use tokio::process::Command;
 use tokio::task::spawn_blocking;
 use tracing::{debug, instrument, trace};
 use walkdir::WalkDir;
+
+/// Ensure that a required directory exists
+pub async fn ensure_directory(purpose: &str, path: &Path) -> Result<()> {
+    if !path.exists() {
+        debug!("{purpose} dir {path:?} doesn't exist yet, creating");
+        create_dir_all(path)
+            .await
+            .wrap_err(format!("Creating {purpose} dir {path:?}"))?;
+    }
+    Ok(())
+}
 
 /// Path escaping, like `systemd-escape --path`.
 ///
@@ -46,23 +58,24 @@ fn escape_byte(b: u8, index: usize) -> String {
 
 /// Get a random unused CID to use with vsock
 ///
-/// The way this works is that every run dir inside `data_dir` contains its own CID. We then look
+/// The way this works is that every run dir inside `runs_dir` contains its own CID. We then look
 /// at all the CIDs in all run dirs to get the current list of CIDs that are in-use and just pick
 /// the next free one.
 ///
 /// This function uses locking so that multiple instances of `vmexec` to not race each other.
 #[instrument]
-pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32> {
+pub async fn create_free_cid(runs_dir: &Path, run_dir: &Path) -> Result<u32> {
     let mut cids = vec![];
-    let data_dir = data_dir.to_owned();
-    let run_data_dir = run_data_dir.to_owned();
+
+    let runs_dir = runs_dir.to_owned();
+    let run_dir = run_dir.to_owned();
 
     let cid: Result<u32, Error> = spawn_blocking(move || {
         let _lockfile = loop {
             std::thread::sleep(Duration::from_millis(100));
 
             // Lock this operation so other instances of vmexec don't race us for CIDs.
-            let lockfile_path = data_dir.join("pid-lockfile");
+            let lockfile_path = runs_dir.join("pid-lockfile");
             trace!("Trying to lock {lockfile_path:?}");
             match PidFile::new(lockfile_path) {
                 Ok(lockfile) => break lockfile,
@@ -74,7 +87,7 @@ pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32
             };
         };
 
-        for entry in WalkDir::new(&data_dir).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(&runs_dir).into_iter().filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy();
 
             if name == "cid" {
@@ -95,7 +108,7 @@ pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32
         };
 
         debug!("Our new CID: {cid}");
-        fs::write(run_data_dir.join("cid"), cid.to_string())?;
+        fs::write(run_dir.join("cid"), cid.to_string())?;
         Ok(cid)
     })
     .await?;
@@ -103,10 +116,11 @@ pub async fn create_free_cid(data_dir: &Path, run_data_dir: &Path) -> Result<u32
     cid
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ExecutablePaths {
     pub qemu_path: PathBuf,
     pub virtiofsd_path: PathBuf,
+    pub virt_copy_out_path: PathBuf,
 }
 
 /// Check whether necessary tools are installed and return their paths
@@ -118,6 +132,10 @@ pub async fn find_required_tools() -> Result<ExecutablePaths> {
     // Find virtiofsd
     let virtiofsd_path = which::which_in("virtiofsd", Some("/usr/lib:/usr/libexec"), "/")
         .wrap_err("Couldn't find virtiofsd in /usr/lib or /usr/libexec")?;
+
+    // Find virt-copy-out
+    let virt_copy_out_path =
+        which::which_global("virt-copy-out").wrap_err("Couldn't find virtiofsd in PATH")?;
 
     // Check whether unshare is working as expected
     let unshare_output = Command::new("unshare")
@@ -134,11 +152,14 @@ pub async fn find_required_tools() -> Result<ExecutablePaths> {
         );
     }
     if !unshare_stdout.starts_with("uid=0(root) gid=0(root) groups=0(root)") {
-        bail!("Expected output to start with 'unshare -r id' to report 'uid=0(root) gid=0(root) groups=0(root)' but got: {unshare_stdout}");
+        bail!(
+            "Expected output to start with 'unshare -r id' to report 'uid=0(root) gid=0(root) groups=0(root)' but got: {unshare_stdout}"
+        );
     }
 
     Ok(ExecutablePaths {
         qemu_path,
         virtiofsd_path,
+        virt_copy_out_path,
     })
 }

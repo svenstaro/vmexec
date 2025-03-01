@@ -1,7 +1,7 @@
 [package]
 name = "vmexec"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [profile.release]
 lto = true
@@ -25,7 +25,6 @@ pidfile2 = "0.1.1"
 rattler_digest = { version = "1.0.5", features = ["tokio"] }
 reqwest = "0.12.12"
 russh = "0.50"
-rustix = { version = "0.38.42", features = ["fs"] }
 shell-escape = "0.1.5"
 sysinfo = "0.33.0"
 tempfile = "3.17.0"

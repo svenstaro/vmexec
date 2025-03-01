@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use std::{env, os::unix::fs::PermissionsExt, path::Path, sync::Arc, time::Duration};
 
 use base64ct::LineEnding;
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::keys::{PrivateKey, PublicKey};
-use russh::{keys::key::PrivateKeyWithHashAlg, ChannelMsg, Disconnect};
+use russh::{ChannelMsg, Disconnect, keys::key::PrivateKeyWithHashAlg};
 use termion::raw::IntoRawMode;
 use tokio::time::Instant;
 use tokio::{
@@ -29,6 +29,23 @@ pub struct PersistedSshKeypair {
     pub privkey_path: PathBuf,
 }
 
+impl PersistedSshKeypair {
+    // Try to load a keypair from `dir`
+    pub async fn from_dir(dir: &Path) -> Result<Self> {
+        let privkey_path = dir.join("id_ed25519");
+        let pubkey_path = privkey_path.with_extension("pub");
+        let privkey_str = fs::read_to_string(&privkey_path).await?;
+        let pubkey_str = fs::read_to_string(&pubkey_path).await?;
+
+        Ok(Self {
+            pubkey_str,
+            _pubkey_path: pubkey_path,
+            privkey_str,
+            privkey_path,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SshLaunchOpts {
     pub privkey: String,
@@ -38,9 +55,15 @@ pub struct SshLaunchOpts {
     pub cid: u32,
 }
 
-/// Create SSH key to be used with the virtual machine
+/// Retrieve or create SSH keypair from `path` to be used with the virtual machine
 #[instrument]
-pub async fn create_ssh_key(dir: &Path) -> Result<PersistedSshKeypair> {
+pub async fn ensure_ssh_key(dir: &Path) -> Result<PersistedSshKeypair> {
+    // First try reading an existing keypair from disk.
+    // If that fails we'll just create a new one.
+    if let Ok(existing_keypair) = PersistedSshKeypair::from_dir(dir).await {
+        return Ok(existing_keypair);
+    }
+
     let privkey_path = dir.join("id_ed25519");
     let pubkey_path = privkey_path.with_extension("pub");
 
@@ -120,7 +143,9 @@ impl Session {
                     // This is "No such device" but for some reason Rust doesn't have an IO
                     // ErrorKind for it. Meh.
                     if now.elapsed() > timeout {
-                        error!("Reached timeout trying to connect to virtual machine via SSH, aborting");
+                        error!(
+                            "Reached timeout trying to connect to virtual machine via SSH, aborting"
+                        );
                         bail!("Timeout");
                     }
                     continue;
@@ -130,7 +155,9 @@ impl Session {
                     | ErrorKind::ConnectionRefused
                     | ErrorKind::ConnectionReset => {
                         if now.elapsed() > timeout {
-                            error!("Reached timeout trying to connect to virtual machine via SSH, aborting");
+                            error!(
+                                "Reached timeout trying to connect to virtual machine via SSH, aborting"
+                            );
                             bail!("Timeout");
                         }
                         continue;
@@ -151,7 +178,9 @@ impl Session {
                         // for some time.
                         ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset => {
                             if now.elapsed() > timeout {
-                                error!("Reached timeout trying to connect to virtual machine via SSH, aborting");
+                                error!(
+                                    "Reached timeout trying to connect to virtual machine via SSH, aborting"
+                                );
                                 bail!("Timeout");
                             }
                         }
@@ -163,7 +192,9 @@ impl Session {
                 }
                 Err(russh::Error::Disconnect) => {
                     if now.elapsed() > timeout {
-                        error!("Reached timeout trying to connect to virtual machine via SSH, aborting");
+                        error!(
+                            "Reached timeout trying to connect to virtual machine via SSH, aborting"
+                        );
                         bail!("Timeout");
                     }
                 }
@@ -268,9 +299,9 @@ impl Session {
     }
 }
 
-/// Connect SSH
+/// Connect SSH and run an interactive session
 #[instrument(skip(cancellation_tokens, ssh_launch_opts))]
-pub async fn connect_ssh(
+pub async fn connect_ssh_interactive(
     cancellation_tokens: CancellationTokens,
     ssh_launch_opts: SshLaunchOpts,
 ) -> Result<()> {
@@ -310,6 +341,37 @@ pub async fn connect_ssh(
 
     info!("Exit code: {:?}", code);
     cancellation_tokens.qemu.cancel();
+    ssh.close().await?;
+    Ok(())
+}
+
+/// Connect SSH and run a command that checks whether the system is ready for operation and then
+/// shuts down.
+#[instrument(skip(ssh_launch_opts))]
+pub async fn connect_ssh_for_warmup(ssh_launch_opts: SshLaunchOpts) -> Result<()> {
+    let privkey = PrivateKey::from_openssh(ssh_launch_opts.privkey)?;
+
+    // Session is a wrapper around a russh client, defined down below
+    let mut ssh =
+        Session::connect(privkey, ssh_launch_opts.cid, 22, ssh_launch_opts.timeout).await?;
+    info!("Connected");
+
+    // First we'll wait until the system has fully booted up
+    let is_running_exitcode = ssh
+        .call(vec![], "systemctl is-system-running --wait")
+        .await?;
+    debug!("systemctl is-system-running --wait exit code {is_running_exitcode}");
+
+    // TODO: Here we'll add a stupid hack to deal with
+    // https://github.com/linux-pam/linux-pam/issues/885 for the time being.
+    ssh.call(vec![], "echo 127.0.0.1 unknown >> /etc/hosts")
+        .await?;
+    ssh.call(vec![], "cat /etc/hosts").await?;
+
+    // Then shut the system down
+    ssh.call(vec![], "systemctl poweroff").await?;
+    debug!("Shutting down system");
+
     ssh.close().await?;
     Ok(())
 }

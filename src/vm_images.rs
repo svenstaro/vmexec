@@ -1,16 +1,17 @@
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{bail, eyre, Context, OptionExt, Result};
+use color_eyre::eyre::{Context, OptionExt, Result, bail};
 use indicatif::{ProgressBar, ProgressStyle};
-use rattler_digest::{compute_file_digest, Sha256};
+use rattler_digest::{Sha256, compute_file_digest};
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncWriteExt,
 };
 use tracing::{debug, info, instrument, trace};
 use url::Url;
+use walkdir::WalkDir;
 
-use crate::cli::Pull;
+use crate::{cli::Pull, utils::ensure_directory};
 
 /// Download Arch Linux image
 pub async fn download_archlinux_image(
@@ -34,7 +35,7 @@ pub async fn download_archlinux_image(
     fs::write(&local_image_checksum_path, &image_checksum)
         .await
         .wrap_err(format!(
-            "Can't write checksum file to '{local_image_checksum_path:?}'"
+            "Can't write checksum file to {local_image_checksum_path:?}"
         ))?;
 
     let mut local_image_file = OpenOptions::new()
@@ -77,7 +78,9 @@ pub async fn download_archlinux_image(
 
     let computed_checksum = compute_file_digest::<Sha256>(&local_image_path)?;
     if image_checksum_raw != computed_checksum.as_slice() {
-        bail!("Checksum mismatch on {local_image_path:?}, maybe the file got corrupted somehow. Try deleting it and retrying.");
+        bail!(
+            "Checksum mismatch on {local_image_path:?}, maybe the file got corrupted somehow. Try deleting it and retrying."
+        );
     }
 
     Ok(())
@@ -88,19 +91,16 @@ pub async fn get_latest_local_archlinux_image(distro_image_dir: &Path) -> Result
     let mut images = vec![];
 
     // First we'll gather a list of all local images.
-    let mut entries = fs::read_dir(distro_image_dir).await?;
-    while let Some(entry) = entries.next_entry().await? {
-        if let Some(ext) = entry.path().extension() {
-            let filename = entry
-                .file_name()
-                .into_string()
-                .map_err(|e| eyre!("Filename invalid somehow: {e:?}"))?;
-            if entry.file_type().await?.is_file()
-                && filename.starts_with("Arch-Linux")
-                && ext == "qcow2"
-            {
-                images.push(entry.path());
-            }
+    for entry in WalkDir::new(distro_image_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let filename = entry.file_name().to_string_lossy();
+        if entry.file_type().is_file()
+            && filename.starts_with("Arch-Linux")
+            && entry.path().extension().unwrap_or_default() == "qcow2"
+        {
+            images.push(entry.path().to_owned());
         }
     }
 
@@ -116,11 +116,7 @@ pub async fn get_latest_local_archlinux_image(distro_image_dir: &Path) -> Result
 #[instrument]
 pub async fn ensure_archlinux_image(cache_dir: &Path, pull: Pull) -> Result<PathBuf> {
     let distro_image_dir = cache_dir.join("images").join("archlinux");
-    if !distro_image_dir.exists() {
-        debug!("Distro image dir {distro_image_dir:?} doesn't exist yet, creating");
-        std::fs::create_dir_all(&distro_image_dir)
-            .wrap_err(format!("Creating distro image dir {distro_image_dir:?}"))?;
-    }
+    ensure_directory("distro image", &distro_image_dir).await?;
 
     let latest_local_image = get_latest_local_archlinux_image(&distro_image_dir).await?;
 
@@ -130,7 +126,9 @@ pub async fn ensure_archlinux_image(cache_dir: &Path, pull: Pull) -> Result<Path
         // downloaded later in the function.
         Pull::Missing => {
             if let Some(latest) = latest_local_image {
-                info!("Found local image {latest:?} and \"--pull missing\" was provided so this is the image we're using");
+                info!(
+                    "Found local image {latest:?} and \"--pull missing\" was provided so this is the image we're using"
+                );
                 return Ok(latest);
             }
         }
@@ -138,7 +136,9 @@ pub async fn ensure_archlinux_image(cache_dir: &Path, pull: Pull) -> Result<Path
         // we'll just return that. If there's no image we'll error out.
         Pull::Never => {
             if let Some(latest) = latest_local_image {
-                info!("Found local image {latest:?} and \"--pull never\" was provided so this is the image we're using");
+                info!(
+                    "Found local image {latest:?} and \"--pull never\" was provided so this is the image we're using"
+                );
                 return Ok(latest);
             } else {
                 bail!("No local image found and `--pull never` selected, bailing");
@@ -146,7 +146,9 @@ pub async fn ensure_archlinux_image(cache_dir: &Path, pull: Pull) -> Result<Path
         }
         Pull::Newer => {
             if let Some(latest) = latest_local_image {
-                info!("Found local image {latest:?} but there might be a newer image so we're checking");
+                info!(
+                    "Found local image {latest:?} but there might be a newer image so we're checking"
+                );
             }
         }
     }
@@ -178,8 +180,10 @@ pub async fn ensure_archlinux_image(cache_dir: &Path, pull: Pull) -> Result<Path
     debug!("Latest remote image is: {image_name}");
 
     // The file will be downloaded to this path.
-    let local_image_path = distro_image_dir.join(&image_name);
+    let image_dir = distro_image_dir.join(build_version);
+    ensure_directory("image dir", &image_dir).await?;
 
+    let local_image_path = image_dir.join(&image_name);
     let image_ext = local_image_path
         .extension()
         .ok_or_eyre("Somehow the image '{local_image_path:?}' didn't have a file extension")?

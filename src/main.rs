@@ -1,9 +1,8 @@
-use clap::{crate_name, CommandFactory, Parser};
-use color_eyre::eyre::{Context, OptionExt, Result};
+use clap::{CommandFactory, Parser, crate_name};
+use color_eyre::eyre::{Context, OptionExt, Result, bail};
 use directories::ProjectDirs;
-use qemu::create_overlay_image;
 use tempfile::TempDir;
-use tracing::{debug, instrument, Level};
+use tracing::{Level, debug, instrument};
 
 mod cli;
 mod qemu;
@@ -12,17 +11,31 @@ mod ssh;
 mod utils;
 mod vm_images;
 
-use crate::runner::run_command;
-use crate::ssh::create_ssh_key;
-use crate::utils::{create_free_cid, find_required_tools};
+use crate::qemu::KernelInitrd;
+use crate::ssh::ensure_ssh_key;
+use crate::utils::{create_free_cid, ensure_directory, find_required_tools};
 use crate::vm_images::ensure_archlinux_image;
 
 fn install_tracing(log_level: Level) {
     use tracing_error::ErrorLayer;
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
-    let fmt_layer = fmt::layer().with_target(false);
+    let format = fmt::format::debug_fn(|writer, field, value| {
+        if field.name() == "message" {
+            write!(writer, "{:?}", value)
+        } else {
+            //dbg!(field);
+            // We'll format the field name and value separated with a colon.
+            write!(writer, "")
+        }
+    })
+    // Separate each field with a comma.
+    // This method is provided by an extension trait in the
+    // `tracing-subscriber` prelude.
+    .delimited("");
+
+    let fmt_layer = fmt::layer().with_target(false).compact().fmt_fields(format);
     let filter_layer = EnvFilter::try_new(format!("{}={}", crate_name!(), log_level)).unwrap();
 
     tracing_subscriber::registry()
@@ -58,46 +71,61 @@ async fn main() -> Result<()> {
     let tool_paths = find_required_tools().await?;
 
     let project_dir = ProjectDirs::from("", "", "vmexec").ok_or_eyre("Couldn't get project dir")?;
+
+    // Dir containing cached stuff (usually ~/.config/vmexec/)
     let cache_dir = project_dir.cache_dir();
-    if !cache_dir.exists() {
-        debug!("Cache dir {cache_dir:?} doesn't exist yet, creating");
-        std::fs::create_dir_all(cache_dir).wrap_err(format!("Creating cache dir {cache_dir:?}"))?;
-    }
+    ensure_directory("cache", cache_dir).await?;
 
+    // Dir containing persistent data (usually ~/.local/share/vmexec/)
     let data_dir = project_dir.data_dir();
-    if !data_dir.exists() {
-        debug!("Data dir {data_dir:?} doesn't exist yet, creating");
-        std::fs::create_dir_all(data_dir).wrap_err(format!("Creating data dir {data_dir:?}"))?;
-    }
+    ensure_directory("data", data_dir).await?;
 
-    // The data dir for the actual run should be temporary and self-deleting so we don't end up
-    // with a lot of garbage after some time.
-    let run_data_dir = TempDir::with_prefix_in("run-", data_dir)
-        .wrap_err("Couldn't make temp dir in {data_dir}")?;
-    debug!("run data dir is: {:?}", run_data_dir.path());
+    // Dir containing secrets (usually ~/.local/share/vmexec/secrets/)
+    let secrets_dir = data_dir.join("secrets");
+    ensure_directory("secrets", &secrets_dir).await?;
 
-    // We need a free CID for host-guest communication via vsock.
-    let cid = create_free_cid(data_dir, run_data_dir.path()).await?;
+    // Dir containing all runs (usually ~/.local/share/vmexec/runs/)
+    let runs_dir = data_dir.join("runs");
+    ensure_directory("runs", &runs_dir).await?;
 
-    let image = if let Some(os) = cli.image_source.os {
+    // Dir for this run (usually ~/.local/share/vmexec/runs/<random id>/)
+    // Temporary and self-deleting so we don't end up with a lot of garbage after some time.
+    let run_dir = TempDir::with_prefix_in("run", &runs_dir)
+        .wrap_err(format!("Couldn't make temp dir in {runs_dir:?}"))?;
+    debug!("run dir is: {:?}", runs_dir);
+
+    let image_path = if let Some(os) = cli.image_source.os {
         match os {
             cli::OsType::Archlinux => ensure_archlinux_image(cache_dir, cli.pull).await?,
         }
-    } else if let Some(image) = cli.image_source.image {
-        image
+    } else if let Some(image_path) = cli.image_source.image {
+        image_path
     } else {
         unreachable!();
     };
 
-    let ssh_keypair = create_ssh_key(run_data_dir.path()).await?;
+    let ssh_keypair = ensure_ssh_key(&secrets_dir).await?;
 
-    let overlay_image = create_overlay_image(run_data_dir.path(), &image).await?;
+    // We need a free CID for host-guest communication via vsock.
+    let cid = create_free_cid(&runs_dir, run_dir.path()).await?;
+
+    let kernel_initrd = if let Some(image_dir) = image_path.parent() {
+        KernelInitrd {
+            kernel_path: image_dir.join("vmlinuz-linux"),
+            initrd_path: image_dir.join("initramfs-linux.img"),
+        }
+    } else {
+        bail!("Somehow {image_path:?} didn't have a parent");
+    };
+
     let qemu_launch_opts = qemu::QemuLaunchOpts {
         volumes: cli.volumes,
-        image: overlay_image,
+        image_path,
+        kernel_initrd,
         show_vm_window: cli.show_vm_window,
         pubkey: ssh_keypair.pubkey_str,
         cid,
+        is_warmup: true,
     };
 
     let ssh_launch_opts = ssh::SshLaunchOpts {
@@ -108,10 +136,29 @@ async fn main() -> Result<()> {
         cid,
     };
 
+    let overlay_image_path = runner::run_warmup(
+        run_dir.path(),
+        tool_paths.clone(),
+        qemu_launch_opts.clone(),
+        ssh_launch_opts.clone(),
+    )
+    .await?;
+
+    // We create a new `QemuLaunchOpts` here so that we can launch QEMU from the overlay image
+    // instead of the source image.
+    let qemu_launch_opts = qemu::QemuLaunchOpts {
+        image_path: overlay_image_path,
+        is_warmup: false,
+        ..qemu_launch_opts
+    };
+
     debug!("SSH command for manual debugging:");
-    debug!("ssh root@vsock/{cid} -i {privkey_path:?} -F /dev/null -o StrictHostKeyChecking=off -o UserKNownHostsFile=/dev/null", privkey_path=ssh_keypair.privkey_path);
-    run_command(
-        run_data_dir.path(),
+    debug!(
+        "ssh root@vsock/{cid} -i {privkey_path:?}",
+        privkey_path = ssh_keypair.privkey_path
+    );
+    runner::run_command(
+        run_dir.path(),
         tool_paths,
         qemu_launch_opts,
         ssh_launch_opts,
