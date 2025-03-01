@@ -54,8 +54,6 @@ pub async fn run_warmup(
     info!("No existing overlay image found, creating...");
 
     create_overlay_image(&qemu_launch_opts.image_path, &overlay_image_path).await?;
-    //let ovmf_vars_system_path = Path::new("/usr/share/edk2/x64/OVMF_VARS.4m.fd");
-    //let ovmf_vars = convert_ovmf_uefi_variables(run_dir, ovmf_vars_system_path).await?;
 
     // Create a new launch struct where we use the overlay image instead of the source image.
     let qemu_launch_opts = QemuLaunchOpts {

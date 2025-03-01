@@ -66,37 +66,6 @@ pub async fn extract_kernel(virt_copy_out_path: &Path, image_path: &Path) -> Res
     Ok(())
 }
 
-/// Convert OVMF UEFI variables raw image to qcow2
-///
-/// We need it to be qcow2 so that snapshotting will work. We don't particularly want to snaphot
-/// the UEFI variables, however, snapshotting the VM only works if all its writeable disks support
-/// it so here we are.
-#[instrument]
-pub async fn convert_ovmf_uefi_variables(run_dir: &Path, source_image: &Path) -> Result<PathBuf> {
-    let output_file = run_dir.join("OVMF_VARS.4m.fd.qcow2");
-
-    let mut qemu_img_cmd = Command::new("qemu-img");
-    qemu_img_cmd
-        .arg("convert")
-        .args(["-O", "qcow2"])
-        .arg(source_image)
-        .arg(&output_file);
-
-    let qemu_img_cmd_str = full_cmd(&qemu_img_cmd);
-    info!("Converting OVMF UEFI vars file to qcow2");
-    debug!("{qemu_img_cmd_str}");
-
-    let qemu_img_output = qemu_img_cmd.output().await?;
-    if !qemu_img_output.status.success() {
-        bail!(
-            "qemu-img convert failed: {}",
-            String::from_utf8_lossy(&qemu_img_output.stderr)
-        );
-    }
-
-    Ok(output_file)
-}
-
 /// Create an overlay image based on a source image
 #[instrument]
 pub async fn create_overlay_image(source_image: &Path, overlay_image: &Path) -> Result<()> {
@@ -180,7 +149,6 @@ pub async fn launch_virtiofsd(
 pub struct QemuLaunchOpts {
     pub volumes: Vec<BindMount>,
     pub image_path: PathBuf,
-    //pub ovmf_uefi_vars_path: PathBuf,
     pub kernel_initrd: KernelInitrd,
     pub show_vm_window: bool,
     pub pubkey: String,
@@ -197,7 +165,6 @@ pub async fn launch_qemu(
     qemu_launch_opts: QemuLaunchOpts,
 ) -> Result<()> {
     let overlay_image_str = qemu_launch_opts.image_path.to_string_lossy();
-    //let ovmf_vars_str = qemu_launch_opts.ovmf_uefi_vars_path.to_string_lossy();
     let kernel_path_str = qemu_launch_opts.kernel_initrd.kernel_path.to_string_lossy();
     let initrd_path_str = qemu_launch_opts.kernel_initrd.initrd_path.to_string_lossy();
 
@@ -215,8 +182,8 @@ pub async fn launch_qemu(
     let sshd_dropin_base64 = Base64::encode_string(sshd_dropin.as_bytes());
     let cid = qemu_launch_opts.cid;
 
-    //let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
-    //let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
+    let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
+    let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
 
     let mut qemu_cmd = Command::new(tool_paths.qemu_path.clone());
     qemu_cmd
@@ -249,16 +216,12 @@ pub async fn launch_qemu(
             "-drive",
             "if=pflash,format=raw,unit=0,file=/usr/share/edk2/x64/OVMF.4m.fd,readonly=on",
         ])
-        //.args([
-        //    "-drive",
-        //    &format!("if=pflash,format=qcow2,unit=1,file={ovmf_vars_str}"),
-        //])
 
         // Overlay image
         .args(["-drive", &format!("if=virtio,node-name=overlay-disk,file={overlay_image_str}")])
 
         // QMP API to expose QEMU command API
-        //.args(["-qmp", &format!("unix:{qmp_socket_path_str}")])
+        .args(["-qmp", &format!("unix:{qmp_socket_path_str}")])
 
         // Here we inject the SSH using systemd.system-credentials, see:
         // https://www.freedesktop.org/software/systemd/man/latest/systemd.system-credentials.html
