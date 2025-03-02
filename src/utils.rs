@@ -5,10 +5,10 @@ use std::{fs, io::ErrorKind};
 use color_eyre::eyre::{Context, bail};
 use color_eyre::{Result, eyre::Error};
 use pidfile::PidFile;
-use tokio::fs::create_dir_all;
+use tokio::fs::{create_dir_all, read_to_string};
 use tokio::process::Command;
 use tokio::task::spawn_blocking;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, warn};
 use walkdir::WalkDir;
 
 /// Ensure that a required directory exists
@@ -162,4 +162,18 @@ pub async fn find_required_tools() -> Result<ExecutablePaths> {
         virtiofsd_path,
         virt_copy_out_path,
     })
+}
+
+pub async fn check_ksm_active() -> Result<()> {
+    let ksm_run = read_to_string("/sys/kernel/mm/ksm/run")
+        .await
+        .wrap_err("Couldn't read /sys/kernel/mm/ksm/run")?;
+    let ksm_active = ksm_run == "1";
+
+    if !ksm_active {
+        warn!("Kernel Samepage Merging (KSM) is disabled.");
+        warn!("It is strongly recommended to enable it. Please see project README about it.");
+    }
+
+    Ok(())
 }

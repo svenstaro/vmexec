@@ -20,6 +20,10 @@ It has a `docker run`-inspired interface that many should already be familiar wi
 - virtiofsd
 - QEMU
 
+### Kernel Samepage Merging (KSM)
+
+It is strongly encouraged to enable KSM in your kernel.
+
 ## TODO
 
 - Document/bench KSM

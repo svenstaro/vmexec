@@ -13,7 +13,7 @@ mod vm_images;
 
 use crate::qemu::KernelInitrd;
 use crate::ssh::ensure_ssh_key;
-use crate::utils::{create_free_cid, ensure_directory, find_required_tools};
+use crate::utils::{check_ksm_active, create_free_cid, ensure_directory, find_required_tools};
 use crate::vm_images::ensure_archlinux_image;
 
 fn install_tracing(log_level: Level) {
@@ -70,6 +70,9 @@ async fn main() -> Result<()> {
         man.render(&mut std::io::stdout())?;
         return Ok(());
     }
+
+    // Check whether KSM is active.
+    check_ksm_active().await?;
 
     // Make sure the tools we need are actually installed.
     let tool_paths = find_required_tools().await?;
