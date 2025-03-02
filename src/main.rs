@@ -41,11 +41,9 @@ fn install_tracing(log_level: Level) {
         .with(ErrorLayer::default());
 
     if log_level <= Level::INFO {
-        println!("rofl");
         let fmt_layer = fmt::layer().with_target(false).compact().fmt_fields(format);
         subscriber.with(fmt_layer).init();
     } else {
-        println!("omg");
         let fmt_layer = fmt::layer().with_target(false).compact();
         subscriber.with(fmt_layer).init();
     };
