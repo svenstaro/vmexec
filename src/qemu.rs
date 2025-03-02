@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
@@ -192,11 +193,18 @@ pub async fn launch_qemu(
     let sshd_dropin_base64 = Base64::encode_string(sshd_dropin.as_bytes());
     let cid = qemu_launch_opts.cid;
 
-    let hostfwd: String = qemu_launch_opts
-        .published_ports
-        .iter()
-        .map(|p| format!(",hostfwd=:{}:{}-:{}", p.host_ip, p.host_port, p.vm_port))
-        .collect();
+    let hostfwd: String =
+        qemu_launch_opts
+            .published_ports
+            .iter()
+            .fold(String::new(), |mut output, p| {
+                let _ = write!(
+                    output,
+                    ",hostfwd=:{}:{}-:{}",
+                    p.host_ip, p.host_port, p.vm_port
+                );
+                output
+            });
 
     let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
     let qmp_socket_path_str = qmp_socket_path.to_string_lossy();

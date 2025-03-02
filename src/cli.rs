@@ -59,7 +59,7 @@ impl FromStr for PublishPort {
     fn from_str(src: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = src.split(':').collect();
 
-        if parts[0] == "" {
+        if parts[0].is_empty() {
             return Err("Expected format: [[hostip:][hostport]:]vmport".to_string());
         }
 
@@ -93,7 +93,7 @@ impl FromStr for PublishPort {
                 let vm_port = parts[2]
                     .parse()
                     .map_err(|_| format!("'{}' is not a valid port", parts[2]))?;
-                let host_port = if parts[1] != "" {
+                let host_port = if !parts[1].is_empty() {
                     parts[1]
                         .parse()
                         .map_err(|_| format!("'{}' is not a valid port", parts[1]))?
