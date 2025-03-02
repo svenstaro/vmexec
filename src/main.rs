@@ -25,7 +25,6 @@ fn install_tracing(log_level: Level) {
         if field.name() == "message" {
             write!(writer, "{:?}", value)
         } else {
-            //dbg!(field);
             // We'll format the field name and value separated with a colon.
             write!(writer, "")
         }
@@ -35,14 +34,21 @@ fn install_tracing(log_level: Level) {
     // `tracing-subscriber` prelude.
     .delimited("");
 
-    let fmt_layer = fmt::layer().with_target(false).compact().fmt_fields(format);
     let filter_layer = EnvFilter::try_new(format!("{}={}", crate_name!(), log_level)).unwrap();
 
-    tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(filter_layer)
-        .with(fmt_layer)
-        .with(ErrorLayer::default())
-        .init();
+        .with(ErrorLayer::default());
+
+    if log_level <= Level::INFO {
+        println!("rofl");
+        let fmt_layer = fmt::layer().with_target(false).compact().fmt_fields(format);
+        subscriber.with(fmt_layer).init();
+    } else {
+        println!("omg");
+        let fmt_layer = fmt::layer().with_target(false).compact();
+        subscriber.with(fmt_layer).init();
+    };
 }
 
 #[tokio::main]
