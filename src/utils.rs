@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{fs, io::ErrorKind};
 
-use color_eyre::eyre::{Context, bail};
+use color_eyre::eyre::{Context, OptionExt, bail};
 use color_eyre::{Result, eyre::Error};
+use directories::ProjectDirs;
 use pidfile::PidFile;
 use tokio::fs::{create_dir_all, read_to_string};
 use tokio::process::Command;
@@ -20,6 +21,41 @@ pub async fn ensure_directory(purpose: &str, path: &Path) -> Result<()> {
             .wrap_err(format!("Creating {purpose} dir {path:?}"))?;
     }
     Ok(())
+}
+
+pub struct VmexecDirs {
+    pub cache_dir: PathBuf,
+    pub secrets_dir: PathBuf,
+    pub runs_dir: PathBuf,
+}
+
+impl VmexecDirs {
+    pub async fn new() -> Result<Self> {
+        let project_dir =
+            ProjectDirs::from("", "", "vmexec").ok_or_eyre("Couldn't get project dir")?;
+
+        // Dir containing cached stuff (usually ~/.config/vmexec/)
+        let cache_dir = project_dir.cache_dir().to_path_buf();
+        ensure_directory("cache", &cache_dir).await?;
+
+        // Dir containing persistent data (usually ~/.local/share/vmexec/)
+        let data_dir = project_dir.data_dir().to_path_buf();
+        ensure_directory("data", &data_dir).await?;
+
+        // Dir containing secrets (usually ~/.local/share/vmexec/secrets/)
+        let secrets_dir = data_dir.join("secrets");
+        ensure_directory("secrets", &secrets_dir).await?;
+
+        // Dir containing all runs (usually ~/.local/share/vmexec/runs/)
+        let runs_dir = data_dir.join("runs");
+        ensure_directory("runs", &runs_dir).await?;
+
+        Ok(Self {
+            cache_dir,
+            secrets_dir,
+            runs_dir,
+        })
+    }
 }
 
 /// Path escaping, like `systemd-escape --path`.
@@ -172,7 +208,8 @@ pub async fn check_ksm_active() -> Result<()> {
 
     if !ksm_active {
         warn!("Kernel Samepage Merging (KSM) is disabled.");
-        warn!("It is strongly recommended to enable it. Please see project README about it.");
+        warn!("It is strongly recommended to enable it.");
+        warn!("You can run `vmexec ksm --enable`");
     }
 
     Ok(())

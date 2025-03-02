@@ -22,7 +22,17 @@ It has a `docker run`-inspired interface that many should already be familiar wi
 
 ### Kernel Samepage Merging (KSM)
 
-It is strongly encouraged to enable KSM in your kernel.
+It is strongly encouraged to enable KSM in your kernel in order to allow for multiple similar VMs to share their pages, thereby strongly cutting their memory costs.
+
+To temporarily enable KSM, you can do this as root:
+
+    echo 1 > /sys/kernel/mm/ksm/run
+
+However, you are advised to enable this permanently by running
+
+    vmexec ksm enable
+
+as root.
 
 ## TODO
 

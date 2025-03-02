@@ -1,6 +1,6 @@
 use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr, time::Duration};
 
-use clap::{Args, Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use tracing::Level;
 
 use crate::utils::escape_path;
@@ -209,14 +209,25 @@ impl FromStr for EnvVar {
     }
 }
 
-/// Run a command in a new virtual machine
-#[derive(Debug, Clone, Parser)]
-#[command(name = "vmexec", author, about, version)]
-pub struct Cli {
-    /// Log messages above specified level (error, warn, info, debug, trace)
-    #[arg(long, default_value = "warn")]
-    pub log_level: Level,
+#[derive(Debug, Clone, Subcommand)]
+pub enum Command {
+    /// Run a command in a new virtual machine
+    Run(RunCommand),
 
+    /// Check and change KSM status
+    ///
+    /// Without flags, this prints the current KSM state and some stats.
+    Ksm(KsmCommand),
+
+    /// Generate completion file for a shell
+    Completions { shell: clap_complete::Shell },
+
+    /// Print man page
+    Manpage,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct RunCommand {
     #[command(flatten)]
     pub image_source: ImageSource,
 
@@ -276,14 +287,36 @@ pub struct Cli {
 
     /// Arguments to run in the virtual machine
     pub args: Vec<String>,
+}
 
-    /// Generate completion file for a shell
-    #[arg(long = "print-completions", value_name = "shell")]
-    pub print_completions: Option<clap_complete::Shell>,
+#[derive(Debug, Clone, Args)]
+pub struct KsmEnableDisable {
+    /// Persistently enable KSM
+    #[arg(short, long)]
+    pub enable: bool,
 
-    /// Generate man page
-    #[arg(long = "print-manpage")]
-    pub print_manpage: bool,
+    /// Persistently disable KSM
+    #[arg(short, long)]
+    pub disable: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct KsmCommand {
+    #[command(flatten)]
+    pub ksm_enable_disable: Option<KsmEnableDisable>,
+}
+
+/// Run a command in a new virtual machine
+#[derive(Debug, Clone, Parser)]
+#[command(name = "vmexec", author, about, version)]
+pub struct Cli {
+    /// Log messages above specified level (error, warn, info, debug, trace)
+    #[arg(long, default_value = "warn")]
+    pub log_level: Level,
+
+    // Subcommand to run
+    #[clap(subcommand)]
+    pub command: Command,
 }
 
 #[cfg(test)]
