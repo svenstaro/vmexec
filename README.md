@@ -23,5 +23,4 @@ It has a `docker run`-inspired interface that many should already be familiar wi
 ## TODO
 
 - Document/bench KSM
-- Port forwarding
 - Better README

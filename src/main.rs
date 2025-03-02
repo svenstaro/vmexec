@@ -124,6 +124,7 @@ async fn main() -> Result<()> {
 
     let qemu_launch_opts = qemu::QemuLaunchOpts {
         volumes: cli.volumes,
+        published_ports: cli.published_ports,
         image_path,
         kernel_initrd,
         show_vm_window: cli.show_vm_window,

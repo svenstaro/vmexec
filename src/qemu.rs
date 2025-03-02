@@ -13,7 +13,11 @@ use color_eyre::eyre::{Context, OptionExt, Result, bail};
 use tokio::process::{Child, Command};
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::{cli::BindMount, runner::CancellationTokens, utils::ExecutablePaths};
+use crate::{
+    cli::{BindMount, PublishPort},
+    runner::CancellationTokens,
+    utils::ExecutablePaths,
+};
 
 // Kernel and initrd paths
 #[derive(Debug, Clone)]
@@ -152,6 +156,7 @@ pub async fn launch_virtiofsd(
 #[derive(Debug, Clone)]
 pub struct QemuLaunchOpts {
     pub volumes: Vec<BindMount>,
+    pub published_ports: Vec<PublishPort>,
     pub image_path: PathBuf,
     pub kernel_initrd: KernelInitrd,
     pub show_vm_window: bool,
@@ -187,6 +192,12 @@ pub async fn launch_qemu(
     let sshd_dropin_base64 = Base64::encode_string(sshd_dropin.as_bytes());
     let cid = qemu_launch_opts.cid;
 
+    let hostfwd: String = qemu_launch_opts
+        .published_ports
+        .iter()
+        .map(|p| format!(",hostfwd=:{}:{}-:{}", p.host_ip, p.host_port, p.vm_port))
+        .collect();
+
     let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
     let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
 
@@ -206,7 +217,7 @@ pub async fn launch_qemu(
         .args(["-device", &format!("vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid={cid}")])
 
         // Network controller
-        .args(["-nic", "user,model=virtio"])
+        .args(["-nic", &format!("user,model=virtio{hostfwd}")])
 
         // Free Page Reporting allows the guest to signal to the host that memory can be reclaimed.
         .args(["-device", "virtio-balloon,free-page-reporting=on"])

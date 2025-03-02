@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::PathBuf, str::FromStr, time::Duration};
+use std::{fmt::Display, net::Ipv4Addr, path::PathBuf, str::FromStr, time::Duration};
 
 use clap::{Args, Parser, ValueEnum};
 use tracing::Level;
@@ -46,6 +46,73 @@ pub struct BindMount {
     pub read_only: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublishPort {
+    pub host_ip: Ipv4Addr,
+    pub host_port: u32,
+    pub vm_port: u32,
+}
+
+impl FromStr for PublishPort {
+    type Err = String;
+
+    fn from_str(src: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = src.split(':').collect();
+
+        if parts[0] == "" {
+            return Err("Expected format: [[hostip:][hostport]:]vmport".to_string());
+        }
+
+        let (host_ip, host_port, vm_port) = match parts.len() {
+            // If there's only a single part, it has to be the `vm_port`.
+            1 => {
+                let host_ip = Ipv4Addr::UNSPECIFIED;
+                let host_port = parts[0]
+                    .parse()
+                    .map_err(|_| format!("'{}' is not a valid port", parts[0]))?;
+                let vm_port = parts[0]
+                    .parse()
+                    .map_err(|_| format!("'{}' is not a valid port", parts[0]))?;
+
+                (host_ip, host_port, vm_port)
+            }
+            2 => {
+                let host_ip = Ipv4Addr::UNSPECIFIED;
+                let host_port = parts[0]
+                    .parse()
+                    .map_err(|_| format!("'{}' is not a valid port", parts[0]))?;
+                let vm_port = parts[1]
+                    .parse()
+                    .map_err(|_| format!("'{}' is not a valid port", parts[1]))?;
+                (host_ip, host_port, vm_port)
+            }
+            3 => {
+                let host_ip = parts[0]
+                    .parse()
+                    .map_err(|_| format!("'{}' is not a valid IPv4", parts[0]))?;
+                let vm_port = parts[2]
+                    .parse()
+                    .map_err(|_| format!("'{}' is not a valid port", parts[2]))?;
+                let host_port = if parts[1] != "" {
+                    parts[1]
+                        .parse()
+                        .map_err(|_| format!("'{}' is not a valid port", parts[1]))?
+                } else {
+                    vm_port
+                };
+                (host_ip, host_port, vm_port)
+            }
+            _ => return Err("Expected format: [[hostip:][hostport]:]vmport".to_string()),
+        };
+
+        Ok(Self {
+            host_ip,
+            host_port,
+            vm_port,
+        })
+    }
+}
+
 impl BindMount {
     pub fn tag(&self) -> String {
         escape_path(&self.dest.to_string_lossy())
@@ -72,7 +139,7 @@ impl Display for BindMount {
 impl FromStr for BindMount {
     type Err = String;
 
-    fn from_str(src: &str) -> Result<BindMount, String> {
+    fn from_str(src: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = src.split(':').collect();
         if parts.len() != 2 && parts.len() != 3 {
             return Err("Expected format: source:dest[:ro]".to_string());
@@ -166,12 +233,29 @@ pub struct Cli {
     /// Can be provided multiple times.
     ///
     /// Expected format: source:dest[:ro]
+    ///
+    /// `ro` can optionally be provided to mark the mount as read-only.
     #[arg(short, long = "volume", value_parser(BindMount::from_str))]
     pub volumes: Vec<BindMount>,
 
+    /// Publish a port on the virtual machine to the host
+    ///
+    /// Can be provided multiple times.
+    ///
+    /// Expected format: [[hostip:][hostport]:]vmport
+    ///
+    /// `hostip` is optional and if not provided, the port will be bound on all host IPs.
+    ///
+    /// `hostport` is optional and if not provided, the same value of `vmport` will be used for the
+    /// host port.
+    ///
+    /// Currently only IPv4 is supported for `hostip`.
+    #[arg(short, long = "publish", value_parser(PublishPort::from_str))]
+    pub published_ports: Vec<PublishPort>,
+
     /// SSH connection timeout
     ///
-    /// Try for this long (in seconds) to connect to the VMs SSH server.
+    /// Try for this long (in seconds) to connect to the virtual machine's SSH server.
     #[arg(
         short,
         long,
@@ -207,6 +291,37 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
+
+    #[rstest]
+    #[case("127.0.0.1:8080:80", "127.0.0.1", "8080", "80")]
+    #[case("80", "0.0.0.0", "80", "80")]
+    #[case("8080:80", "0.0.0.0", "8080", "80")]
+    #[case("127.0.0.1::80", "127.0.0.1", "80", "80")]
+    fn test_parse_publish_port_valid(
+        #[case] input: &str,
+        #[case] host_ip: Ipv4Addr,
+        #[case] host_port: u32,
+        #[case] vm_port: u32,
+    ) {
+        let actual = PublishPort::from_str(input).unwrap();
+        let expected = PublishPort {
+            host_ip,
+            host_port,
+            vm_port,
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[rstest]
+    #[case("foo", "'foo' is not a valid port")]
+    #[case("foo::", "'foo' is not a valid IPv4")]
+    #[case("::", "Expected format: [[hostip:][hostport]:]vmport")]
+    #[case("1:2:3:4", "Expected format: [[hostip:][hostport]:]vmport")]
+    #[case(":80:", "Expected format: [[hostip:][hostport]:]vmport")]
+    fn test_parse_publish_port_invalid(#[case] input: &str, #[case] expected: &str) {
+        let actual = PublishPort::from_str(input).unwrap_err();
+        assert_eq!(actual, expected);
+    }
 
     #[rstest]
     #[case("/tmp:/tmp", "/tmp", "/tmp", false)]
