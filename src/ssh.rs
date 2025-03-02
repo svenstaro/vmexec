@@ -95,8 +95,8 @@ pub async fn ensure_ssh_key(dir: &Path) -> Result<PersistedSshKeypair> {
 #[derive(Debug, Clone)]
 struct SshClient {}
 
-// More SSH event handlers
-// can be defined in this trait
+// More SSH event handlers can be defined in this trait
+//
 // In this example, we're only using Channel, so these aren't needed.
 impl russh::client::Handler for SshClient {
     type Error = russh::Error;
@@ -110,11 +110,11 @@ impl russh::client::Handler for SshClient {
     }
 }
 
-/// This struct is a convenience wrapper
-/// around a russh client
-/// that handles the input/output event loop
+/// This struct is a convenience wrapper around a russh client that handles the input/output event
+/// loop
 pub struct Session {
     session: russh::client::Handle<SshClient>,
+    terminal_size: (u16, u16),
 }
 
 impl Session {
@@ -215,23 +215,23 @@ impl Session {
             bail!("Authentication (with publickey) failed");
         }
 
-        Ok(Self { session })
+        Ok(Self {
+            session,
+            terminal_size: termion::terminal_size()?,
+        })
     }
 
     #[instrument(skip(self))]
     async fn call(&mut self, env: Vec<EnvVar>, command: &str) -> Result<u32> {
         let mut channel = self.session.channel_open_session().await?;
 
-        // This example doesn't terminal resizing after the connection is established
-        let (w, h) = termion::terminal_size()?;
-
         // Request an interactive PTY from the server
         channel
             .request_pty(
                 true,
                 &env::var("TERM").unwrap_or("xterm-256color".into()),
-                w as u32,
-                h as u32,
+                self.terminal_size.0 as u32,
+                self.terminal_size.1 as u32,
                 0,
                 0,
                 &[], // ideally you want to pass the actual terminal modes here
@@ -254,6 +254,15 @@ impl Session {
         loop {
             // Handle one of the possible events:
             tokio::select! {
+                // Handle terminal resize
+                _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                    let new_terminal_size = termion::terminal_size()?;
+                    if self.terminal_size != new_terminal_size {
+                        debug!("Terminal size change detected");
+                        self.terminal_size = new_terminal_size;
+                        channel.window_change(new_terminal_size.0 as u32, new_terminal_size.1 as u32, 0, 0).await?;
+                    }
+                },
                 // There's terminal input available from the user
                 r = stdin.read(&mut buf), if !stdin_closed => {
                     match r {

@@ -9,4 +9,3 @@ Run a single command in a virtual machine
 ## TODO
 
 - Document/bench KSM
-- Terminal resizing
