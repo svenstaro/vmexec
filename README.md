@@ -9,5 +9,4 @@ Run a single command in a virtual machine
 ## TODO
 
 - Document/bench KSM
-- VM memory templating
 - Terminal resizing
