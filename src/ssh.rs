@@ -374,7 +374,7 @@ pub async fn connect_ssh_for_warmup(
 
     // First we'll wait until the system has fully booted up
     let is_running_exitcode = ssh
-        .call(vec![], "systemctl is-system-running --wait")
+        .call(vec![], "systemctl is-system-running --wait --quiet")
         .await?;
     debug!("systemctl is-system-running --wait exit code {is_running_exitcode}");
 
@@ -382,7 +382,6 @@ pub async fn connect_ssh_for_warmup(
     // https://github.com/linux-pam/linux-pam/issues/885 for the time being.
     ssh.call(vec![], "echo 127.0.0.1 unknown >> /etc/hosts")
         .await?;
-    ssh.call(vec![], "cat /etc/hosts").await?;
 
     // Then shut the system down
     ssh.call(vec![], "systemctl poweroff").await?;
