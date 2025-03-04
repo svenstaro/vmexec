@@ -170,8 +170,8 @@ pub async fn find_required_tools() -> Result<ExecutablePaths> {
         .wrap_err("Couldn't find virtiofsd in /usr/lib or /usr/libexec")?;
 
     // Find virt-copy-out
-    let virt_copy_out_path =
-        which::which_global("virt-copy-out").wrap_err("Couldn't find virtiofsd in PATH")?;
+    let virt_copy_out_path = which::which_global("virt-copy-out")
+        .wrap_err("Couldn't find virt-copy-out (from libguestfs) in PATH")?;
 
     // Check whether unshare is working as expected
     let unshare_output = Command::new("unshare")
