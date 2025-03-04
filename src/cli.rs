@@ -128,7 +128,7 @@ impl Display for BindMount {
         let source = self.source.to_string_lossy();
         let dest = self.dest.to_string_lossy();
         if self.read_only {
-            write!(f, "{source}:{dest}:ro",)
+            write!(f, "{source}:{dest}:ro")
         } else {
             write!(f, "{source}:{dest}")
         }
