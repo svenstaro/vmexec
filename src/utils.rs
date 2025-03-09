@@ -1,16 +1,14 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-use std::{fs, io::ErrorKind};
 
+use async_walkdir::{Filtering, WalkDir};
+use color_eyre::Result;
 use color_eyre::eyre::{Context, OptionExt, bail};
-use color_eyre::{Result, eyre::Error};
+use dir_lock::DirLock;
 use directories::ProjectDirs;
-use pidfile::PidFile;
-use tokio::fs::{create_dir_all, read_to_string};
+use futures::StreamExt;
+use tokio::fs::{self, create_dir_all, read_to_string};
 use tokio::process::Command;
-use tokio::task::spawn_blocking;
 use tracing::{debug, instrument, trace, warn};
-use walkdir::WalkDir;
 
 /// Ensure that a required directory exists
 pub async fn ensure_directory(purpose: &str, path: &Path) -> Result<()> {
@@ -106,50 +104,43 @@ pub async fn create_free_cid(runs_dir: &Path, run_dir: &Path) -> Result<u32> {
     let runs_dir = runs_dir.to_owned();
     let run_dir = run_dir.to_owned();
 
-    let cid: Result<u32, Error> = spawn_blocking(move || {
-        let _lockfile = loop {
-            std::thread::sleep(Duration::from_millis(100));
+    let lock_dir = runs_dir.join("lockdir");
+    trace!("Trying to lock {lock_dir:?}");
+    let _ = DirLock::new(lock_dir).await?;
 
-            // Lock this operation so other instances of vmexec don't race us for CIDs.
-            let lockfile_path = runs_dir.join("pid-lockfile");
-            trace!("Trying to lock {lockfile_path:?}");
-            match PidFile::new(lockfile_path) {
-                Ok(lockfile) => break lockfile,
-                Err(ref e) => match e.kind() {
-                    // AddrInUse means we're going to have to wait on the lock.
-                    ErrorKind::AddrInUse => continue,
-                    e => bail!(e),
-                },
-            };
-        };
+    let mut entries = WalkDir::new(runs_dir).filter(|entry| async move {
+        let filename = entry.file_name();
+        if filename.to_string_lossy() == "cid" {
+            return Filtering::Continue;
+        }
+        Filtering::Ignore
+    });
 
-        for entry in WalkDir::new(&runs_dir).into_iter().filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy();
-
-            if name == "cid" {
+    loop {
+        match entries.next().await {
+            Some(Ok(entry)) => {
                 trace!("Found CID file at {:?}", entry.path());
-                let cid = fs::read_to_string(entry.path())?;
+                let cid = fs::read_to_string(entry.path()).await?;
                 cids.push(cid.parse::<u32>()?);
             }
+            Some(Err(e)) => bail!(e),
+            None => break,
         }
+    }
 
-        // Get the next CID.
-        cids.sort();
-        let cid = if let Some(last_cid) = cids.iter().next_back() {
-            last_cid + 1
-        } else {
-            // We get here if the current list of CIDs is empty. So we'll just start with some
-            // arbitrary CID.
-            10
-        };
+    // Get the next CID.
+    cids.sort();
+    let cid = if let Some(last_cid) = cids.iter().next_back() {
+        last_cid + 1
+    } else {
+        // We get here if the current list of CIDs is empty. So we'll just start with some
+        // arbitrary CID.
+        10
+    };
 
-        debug!("Our new CID: {cid}");
-        fs::write(run_dir.join("cid"), cid.to_string())?;
-        Ok(cid)
-    })
-    .await?;
-
-    cid
+    debug!("Our new CID: {cid}");
+    fs::write(run_dir.join("cid"), cid.to_string()).await?;
+    Ok(cid)
 }
 
 #[derive(Clone, Debug)]

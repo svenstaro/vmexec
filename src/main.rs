@@ -72,7 +72,7 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
     // Temporary and self-deleting so we don't end up with a lot of garbage after some time.
     let run_dir = TempDir::with_prefix_in("run", &dirs.runs_dir)
         .wrap_err(format!("Couldn't make temp dir in {:?}", dirs.runs_dir))?;
-    debug!("run dir is: {:?}", run_dir);
+    debug!("run dir is: {:?}", run_dir.path());
 
     let image_path = if let Some(os) = run_args.image_source.os {
         match os {

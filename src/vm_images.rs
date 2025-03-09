@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use async_walkdir::{Filtering, WalkDir};
 use color_eyre::eyre::{Context, OptionExt, Result, bail};
+use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use rattler_digest::{Sha256, compute_file_digest};
 use tokio::{
@@ -9,7 +11,6 @@ use tokio::{
 };
 use tracing::{debug, info, instrument, trace};
 use url::Url;
-use walkdir::WalkDir;
 
 use crate::{cli::Pull, utils::ensure_directory};
 
@@ -91,16 +92,22 @@ pub async fn get_latest_local_archlinux_image(distro_image_dir: &Path) -> Result
     let mut images = vec![];
 
     // First we'll gather a list of all local images.
-    for entry in WalkDir::new(distro_image_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let filename = entry.file_name().to_string_lossy();
-        if entry.file_type().is_file()
-            && filename.starts_with("Arch-Linux")
+    let mut entries = WalkDir::new(distro_image_dir).filter(|entry| async move {
+        let filename = entry.file_name();
+        if entry.file_type().await.unwrap().is_file()
+            && filename.to_string_lossy().starts_with("Arch-Linux")
             && entry.path().extension().unwrap_or_default() == "qcow2"
         {
-            images.push(entry.path().to_owned());
+            return Filtering::Continue;
+        }
+        Filtering::Ignore
+    });
+
+    loop {
+        match entries.next().await {
+            Some(Ok(entry)) => images.push(entry.path().to_owned()),
+            Some(Err(e)) => bail!(e),
+            None => break,
         }
     }
 
