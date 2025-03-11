@@ -6,6 +6,7 @@ use color_eyre::eyre::{Context, OptionExt, bail};
 use dir_lock::DirLock;
 use directories::ProjectDirs;
 use futures::StreamExt;
+use termion::{color, style};
 use tokio::fs::{self, create_dir_all, read_to_string};
 use tokio::process::Command;
 use tracing::{debug, instrument, trace, warn};
@@ -195,13 +196,57 @@ pub async fn check_ksm_active() -> Result<()> {
     let ksm_run = read_to_string("/sys/kernel/mm/ksm/run")
         .await
         .wrap_err("Couldn't read /sys/kernel/mm/ksm/run")?;
-    let ksm_active = ksm_run == "1";
+    let ksm_active = ksm_run.trim() == "1";
 
     if !ksm_active {
         warn!("Kernel Samepage Merging (KSM) is disabled.");
         warn!("It is strongly recommended to enable it.");
         warn!("You can run `vmexec ksm --enable`");
     }
+
+    Ok(())
+}
+
+pub async fn print_ksm_stats() -> Result<()> {
+    let pages_scanned = fs::read_to_string("/sys/kernel/mm/ksm/pages_scanned").await?;
+    let pages_sharing = fs::read_to_string("/sys/kernel/mm/ksm/pages_sharing").await?;
+    let full_scans = fs::read_to_string("/sys/kernel/mm/ksm/full_scans").await?;
+    let general_profit = fs::read_to_string("/sys/kernel/mm/ksm/general_profit").await?;
+    let general_profit_human =
+        humansize::format_size(general_profit.trim().parse::<u64>()?, humansize::BINARY);
+
+    println!(
+        "Pages scanned: {}{}{:>10}{}{}",
+        style::Bold,
+        color::Fg(color::Blue),
+        pages_scanned.trim(),
+        color::Fg(color::Reset),
+        style::Reset,
+    );
+    println!(
+        "Pages sharing: {}{}{:>10}{}{}",
+        style::Bold,
+        color::Fg(color::Blue),
+        pages_sharing.trim(),
+        color::Fg(color::Reset),
+        style::Reset,
+    );
+    println!(
+        "Full scans: {}{}{:>13}{}{}",
+        style::Bold,
+        color::Fg(color::Blue),
+        full_scans.trim(),
+        color::Fg(color::Reset),
+        style::Reset,
+    );
+    println!(
+        "{}General profit: {:>9}{}{}{}",
+        style::Bold,
+        general_profit_human,
+        color::Fg(color::LightBlue),
+        color::Fg(color::Reset),
+        style::Reset,
+    );
 
     Ok(())
 }

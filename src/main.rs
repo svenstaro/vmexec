@@ -17,7 +17,7 @@ mod vm_images;
 use crate::cli::{Command, KsmCommand, RunCommand};
 use crate::qemu::KernelInitrd;
 use crate::ssh::ensure_ssh_key;
-use crate::utils::{check_ksm_active, create_free_cid, find_required_tools};
+use crate::utils::{check_ksm_active, create_free_cid, find_required_tools, print_ksm_stats};
 use crate::vm_images::ensure_archlinux_image;
 
 fn install_tracing(log_level: Level) {
@@ -79,51 +79,13 @@ w /sys/kernel/mm/ksm/advisor_mode - - - - scan-time
     } else {
         let ksm_enabled = read_to_string("/sys/kernel/mm/ksm/run").await?.trim() == "1";
         if ksm_enabled {
-            let pages_scanned = fs::read_to_string("/sys/kernel/mm/ksm/pages_scanned").await?;
-            let pages_sharing = fs::read_to_string("/sys/kernel/mm/ksm/pages_sharing").await?;
-            let full_scans = fs::read_to_string("/sys/kernel/mm/ksm/full_scans").await?;
-            let general_profit = fs::read_to_string("/sys/kernel/mm/ksm/general_profit").await?;
-            let general_profit_human =
-                humansize::format_size(general_profit.trim().parse::<u64>()?, humansize::BINARY);
-
             println!(
                 "{}KSM status: {}enabled{}",
                 style::Bold,
                 color::Fg(color::LightGreen),
                 style::Reset,
             );
-            println!(
-                "Pages scanned: {}{}{:>10}{}{}",
-                style::Bold,
-                color::Fg(color::Blue),
-                pages_scanned.trim(),
-                color::Fg(color::Reset),
-                style::Reset,
-            );
-            println!(
-                "Pages sharing: {}{}{:>10}{}{}",
-                style::Bold,
-                color::Fg(color::Blue),
-                pages_sharing.trim(),
-                color::Fg(color::Reset),
-                style::Reset,
-            );
-            println!(
-                "Full scans: {}{}{:>13}{}{}",
-                style::Bold,
-                color::Fg(color::Blue),
-                full_scans.trim(),
-                color::Fg(color::Reset),
-                style::Reset,
-            );
-            println!(
-                "{}General profit: {:>9}{}{}{}",
-                style::Bold,
-                general_profit_human,
-                color::Fg(color::LightBlue),
-                color::Fg(color::Reset),
-                style::Reset,
-            );
+            print_ksm_stats().await?;
         } else {
             println!(
                 "{}KSM status: {}disabled{}",
