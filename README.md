@@ -25,8 +25,8 @@ Nowadays, many are used to the convenience of container runners such as `podman`
 
 ## Requirements
 
-- virtiofsd
-- QEMU
+- [QEMU](https://www.qemu.org/)
+- [virtiofsd](https://gitlab.com/virtio-fs/virtiofsd)
 
 ## How to run
 
