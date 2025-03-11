@@ -291,11 +291,11 @@ pub struct RunCommand {
 
 #[derive(Debug, Clone, Args)]
 pub struct KsmEnableDisable {
-    /// Persistently enable KSM
+    /// Persistently enable KSM by writing settings to /etc/tmpfiles.d/ksm.conf
     #[arg(short, long)]
     pub enable: bool,
 
-    /// Persistently disable KSM
+    /// Persistently disable KSM by deleting /etc/tmpfiles.d/ksm.conf
     #[arg(short, long)]
     pub disable: bool,
 }

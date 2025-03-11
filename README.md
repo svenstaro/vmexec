@@ -30,11 +30,16 @@ To temporarily enable KSM, you can do this as root:
 
 However, you are advised to enable this permanently by running
 
-    vmexec ksm enable
+    vmexec ksm --enable
 
 as root.
 
+When running a VM or two, you can check the shared memory stats via
+
+    vmexec ksm
+
+which will print a few pretty stats for you.
+
 ## TODO
 
-- Document/bench KSM
 - Better README

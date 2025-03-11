@@ -1,6 +1,9 @@
 use clap::{CommandFactory, Parser, crate_name};
 use color_eyre::eyre::{Context, Result, bail};
 use tempfile::TempDir;
+use termion::{color, style};
+use tokio::fs::{self, read_to_string};
+use tokio::process;
 use tracing::{Level, debug, instrument};
 use utils::VmexecDirs;
 
@@ -52,9 +55,83 @@ fn install_tracing(log_level: Level) {
 
 async fn ksm_command(ksm_args: KsmCommand) -> Result<()> {
     if let Some(enable_disable) = ksm_args.ksm_enable_disable {
-        println!("{:?}", enable_disable);
+        if whoami::username() != "root" {
+            bail!("You need to run this particular subcommand as root");
+        }
+
+        if enable_disable.enable {
+            println!("Writing KSM config to /etc/tmpfiles.d/ksm.conf and reloading systemd");
+            let ksm_conf = "\
+w /sys/kernel/mm/ksm/run - - - - 1
+w /sys/kernel/mm/ksm/advisor_mode - - - - scan-time
+";
+            fs::write("/etc/tmpfiles.d/ksm.conf", ksm_conf).await?;
+            process::Command::new("systemd-tmpfiles")
+                .arg("--create")
+                .output()
+                .await?;
+        } else if enable_disable.disable {
+            println!("Removing KSM config at /etc/tmpfiles.d/ksm.conf and reloading systemd");
+            fs::write("/sys/kernel/mm/ksm/run", "0").await?;
+            fs::write("/sys/kernel/mm/ksm/advisor_mode", "none").await?;
+            fs::remove_file("/etc/tmpfiles.d/ksm.conf").await?;
+        }
     } else {
-        println!("status");
+        let ksm_enabled = read_to_string("/sys/kernel/mm/ksm/run").await?.trim() == "1";
+        if ksm_enabled {
+            let pages_scanned = fs::read_to_string("/sys/kernel/mm/ksm/pages_scanned").await?;
+            let pages_sharing = fs::read_to_string("/sys/kernel/mm/ksm/pages_sharing").await?;
+            let full_scans = fs::read_to_string("/sys/kernel/mm/ksm/full_scans").await?;
+            let general_profit = fs::read_to_string("/sys/kernel/mm/ksm/general_profit").await?;
+            let general_profit_human =
+                humansize::format_size(general_profit.trim().parse::<u64>()?, humansize::BINARY);
+
+            println!(
+                "{}KSM status: {}enabled{}",
+                style::Bold,
+                color::Fg(color::LightGreen),
+                style::Reset,
+            );
+            println!(
+                "Pages scanned: {}{}{:>10}{}{}",
+                style::Bold,
+                color::Fg(color::Blue),
+                pages_scanned.trim(),
+                color::Fg(color::Reset),
+                style::Reset,
+            );
+            println!(
+                "Pages sharing: {}{}{:>10}{}{}",
+                style::Bold,
+                color::Fg(color::Blue),
+                pages_sharing.trim(),
+                color::Fg(color::Reset),
+                style::Reset,
+            );
+            println!(
+                "Full scans: {}{}{:>13}{}{}",
+                style::Bold,
+                color::Fg(color::Blue),
+                full_scans.trim(),
+                color::Fg(color::Reset),
+                style::Reset,
+            );
+            println!(
+                "{}General profit: {:>9}{}{}{}",
+                style::Bold,
+                general_profit_human,
+                color::Fg(color::LightBlue),
+                color::Fg(color::Reset),
+                style::Reset,
+            );
+        } else {
+            println!(
+                "{}KSM status: {}disabled{}",
+                style::Bold,
+                color::Fg(color::Yellow),
+                style::Reset
+            );
+        }
     }
     Ok(())
 }
