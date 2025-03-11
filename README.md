@@ -32,7 +32,7 @@ Nowadays, many are used to the convenience of container runners such as `podman`
 
 ### Run a basic command
 
-    vmexec --os archlinux -- echo hello from inside VM
+    vmexec run --os archlinux -- echo hello from inside VM
 
 This will take a long time the first time because it will download the Arch
 Linux image and then warm it up by booting it, waiting until the first-boot
@@ -41,19 +41,19 @@ runs will use this snapshot which will result in quick follow-up commands.
 
 ### Run an interactive command
 
-    vmexec --os archlinux -- bash
+    vmexec run --os archlinux -- bash
 
 ### Set an environment variable
 
-    vmexec --os archlinux -e HELLO=yeshello -- bash -c '$HELLO'
+    vmexec run --os archlinux -e HELLO=yeshello -- bash -c '$HELLO'
 
 ### Bind a directory from the host
 
-    vmexec --os archlinux -v $PWD/hostdir:/mnt -- ls -lha /mnt
+    vmexec run --os archlinux -v $PWD/hostdir:/mnt -- ls -lha /mnt
 
 ### Forward a port from the VM to the host
 
-    vmexec --os archlinux -p 8080:80 -- nc -l -p 80
+    vmexec run --os archlinux -p 8080:80 -- nc -l -p 80
 
 ## Kernel Samepage Merging (KSM)
 
