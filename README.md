@@ -6,7 +6,7 @@
 [![Stars](https://img.shields.io/github/stars/svenstaro/vmexec.svg)](https://github.com/svenstaro/vmexec/stargazers)
 [![Lines of Code](https://tokei.rs/b1/github/svenstaro/vmexec)](https://github.com/svenstaro/vmexec)
 
-**Run a single command in a virtual machine with zero-setup and great performance**
+**Run a single command in a speedy virtual machine with zero-setup**
 
 **vmexec** is a zero-setup CLI tool that runs single commands in a throwaway virtual machines.
 The idea is for you to run a command a command in VM without having think about the performance implications, how to mount files, how to forward ports, etc.
