@@ -189,8 +189,6 @@ pub async fn launch_qemu(
 
     let ssh_pubkey_base64 = Base64::encode_string(qemu_launch_opts.pubkey.as_bytes());
 
-    let sshd_dropin = "[Service]\nExecStart=\nExecStart=/usr/bin/sshd -D -o 'AcceptEnv *'\n";
-    let sshd_dropin_base64 = Base64::encode_string(sshd_dropin.as_bytes());
     let cid = qemu_launch_opts.cid;
 
     let hostfwd: String =
@@ -253,14 +251,6 @@ pub async fn launch_qemu(
             "-smbios",
             &format!(
                 "type=11,value=io.systemd.credential.binary:ssh.authorized_keys.root={ssh_pubkey_base64}"
-            ),
-        ])
-
-        // Allow setting arbitrary environment variables.
-        .args([
-            "-smbios",
-            &format!(
-                "type=11,value=io.systemd.credential.binary:systemd.unit-dropin.sshd.service={sshd_dropin_base64}"
             ),
         ]);
 

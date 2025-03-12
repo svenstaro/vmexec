@@ -367,12 +367,12 @@ pub async fn connect_ssh_for_warmup(
 ) -> Result<()> {
     let privkey = PrivateKey::from_openssh(ssh_launch_opts.privkey)?;
 
-    // Session is a wrapper around a russh client, defined down below
+    // Session is a wrapper around a russh client, defined down below.
     let mut ssh =
         Session::connect(privkey, ssh_launch_opts.cid, 22, ssh_launch_opts.timeout).await?;
     info!("Connected");
 
-    // First we'll wait until the system has fully booted up
+    // First we'll wait until the system has fully booted up.
     let is_running_exitcode = ssh
         .call(vec![], "systemctl is-system-running --wait --quiet")
         .await?;
@@ -383,7 +383,11 @@ pub async fn connect_ssh_for_warmup(
     ssh.call(vec![], "echo 127.0.0.1 unknown >> /etc/hosts")
         .await?;
 
-    // Then shut the system down
+    // Allow the --env option to work by allowing SSH to accept all sent environment variables.
+    ssh.call(vec![], "echo AcceptEnv * >> /etc/ssh/sshd_config")
+        .await?;
+
+    // Then shut the system down.
     ssh.call(vec![], "systemctl poweroff").await?;
     debug!("Shutting down system");
 
