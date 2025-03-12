@@ -1,0 +1,13 @@
+sign-commit = true
+sign-tag = true
+pre-release-replacements = [
+  {file="CHANGELOG.md", search="Unreleased", replace="{{version}}"},
+  {file="CHANGELOG.md", search="\\.\\.\\.HEAD", replace="...{{tag_name}}", exactly=1},
+  {file="CHANGELOG.md", search="ReleaseDate", replace="{{date}}"},
+  {file="CHANGELOG.md", search="<!-- next-header -->", replace="<!-- next-header -->\n\n## [Unreleased] - ReleaseDate"},
+  {file="CHANGELOG.md", search="<!-- next-url -->", replace="<!-- next-url -->\n[Unreleased]: https://github.com/svenstaro/vmexec/compare/{{tag_name}}...HEAD", exactly=1},
+]
+# Get rid of the default cargo-release "chore: " prefix in messages as we don't
+# use semantic commits in this repository.
+pre-release-commit-message = "Release {{crate_name}} version {{version}}"
+tag-message = "Release {{crate_name}} version {{version}}"
