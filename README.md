@@ -20,7 +20,9 @@ Nowadays, many are used to the convenience of container runners such as `podman`
 - Volume mounting (`-v/--volume`)
 - Port forwarding (`-p/--publish`)
 - Automatic image pulling (`--pull`)
+- Does the right things automatically for maximum performance (sane CPU, memory, and device settings such as virtio drivers)
 - Image warmup phase with after-first-boot snapshotting for quick VM boot times (usually less than 5s)
+- Doesn't need libvirt, uses QEMU directly
 - Uses [vsock](https://man7.org/linux/man-pages/man7/vsock.7.html) for efficient and secure local transport
 
 ## Requirements
@@ -76,6 +78,15 @@ When running a VM or two, you can check the shared memory stats via
     vmexec ksm
 
 which will print a few pretty stats for you.
+
+## Other projects
+
+If you like this kind of stuff or if this doesn't exactly fit your needs, there are also these projects:
+
+- [quickemu](https://github.com/quickemu-project/quickemu)
+- [katacontainers](https://katacontainers.io/)
+- [VmChamp](https://github.com/wubbl0rz/VmChamp)
+- [lima](https://github.com/lima-vm/lima)
 
 ## Releasing
 
