@@ -153,6 +153,19 @@ pub async fn launch_virtiofsd(
         .arg(virtiofsd_path)
         .args(["--shared-dir", &volume.source.to_string_lossy()])
         .args(["--socket-path", &socket_path.to_string_lossy()])
+        // This seems to allow us to skip past the guest's page cache which is very desireable
+        // since we want to ensure that the memory usage inside the guest stays minimal. If we
+        // instead hit the host directly then the host can manage the cache for us.
+        .args(["--cache", "never"])
+        // Like the above, we want to skip the caches as much as possible. so allowing direct IO
+        // seems prudent.
+        .arg("--allow-direct-io")
+        // It seems like a good idea to allow mmap to work so that users are not suprised by weird
+        // kernel errors.
+        .arg("--allow-mmap")
+        // Create a thread pool with 8 threads. We have yet to test whether this does anything in
+        // terms of performance.
+        .args(["--thread-pool-size", "8"])
         .args(["--sandbox", "chroot"]);
 
     if volume.read_only {

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+- Add some flags to `virtiofsd` call to improve performance and decrease guest memory usage
 - Fix multiple `-v` options not working due to incorrect fstab getting generated
 
 ## [0.1.1] - 2025-03-13
