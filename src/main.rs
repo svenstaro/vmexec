@@ -206,10 +206,9 @@ async fn main() -> Result<()> {
             let app_name = clap_app.get_name().to_string();
             clap_complete::generate(shell, &mut clap_app, app_name, &mut std::io::stdout());
         }
-        Command::Manpage => {
+        Command::Manpage { out_dir } => {
             let clap_app = cli::Cli::command();
-            let man = clap_mangen::Man::new(clap_app);
-            man.render(&mut std::io::stdout())?;
+            clap_mangen::generate_to(clap_app, out_dir)?;
         }
     }
     Ok(())

@@ -223,7 +223,7 @@ pub enum Command {
     Completions { shell: clap_complete::Shell },
 
     /// Print man page
-    Manpage,
+    Manpage { out_dir: PathBuf },
 }
 
 #[derive(Debug, Clone, Args)]
