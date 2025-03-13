@@ -298,6 +298,7 @@ pub async fn launch_qemu(
         qemu_cmd.arg("-snapshot");
 
         // Directory sharing
+        let mut fstab_entries = vec![];
         for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
             let virtiofsd_child = launch_virtiofsd(&tool_paths.virtiofsd_path, run_dir, vol)
                 .await
@@ -313,8 +314,8 @@ pub async fn launch_qemu(
             } else {
                 String::new()
             };
-            let fstab = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
-            let fstab_base64 = Base64::encode_string(fstab.as_bytes());
+            let fstab_entry = format!("{tag} {dest_path} virtiofs defaults{read_only} 0 0");
+            fstab_entries.push(fstab_entry);
             qemu_cmd
                 .args([
                     "-chardev",
@@ -323,13 +324,16 @@ pub async fn launch_qemu(
                 .args([
                     "-device",
                     &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
-                ])
-                .args([
-                    "-smbios",
-                    &format!(
-                        "type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"
-                    ),
                 ]);
+        }
+
+        if !fstab_entries.is_empty() {
+            let fstab = fstab_entries.join("\n");
+            let fstab_base64 = Base64::encode_string(fstab.as_bytes());
+            qemu_cmd.args([
+                "-smbios",
+                &format!("type=11,value=io.systemd.credential.binary:fstab.extra={fstab_base64}"),
+            ]);
         }
     }
 

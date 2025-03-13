@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+- Fix multiple `-v` options not working due to incorrect fstab getting generated
 
 ## [0.1.1] - 2025-03-13
 - Fix NvVars file getting created in mounted dirs
