@@ -3526,7 +3526,7 @@ dependencies = [
 
 [[package]]
 name = "vmexec"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-walkdir",
  "base64ct",
