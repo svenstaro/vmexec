@@ -61,7 +61,7 @@ pub async fn extract_kernel(virt_copy_out_path: &Path, image_path: &Path) -> Res
         .arg(dest_dir);
 
     let virt_copy_out_cmd_str = full_cmd(&virt_copy_out_cmd);
-    info!("Extracing kernel from {image_path:?}");
+    info!("Extracting kernel from {image_path:?}");
     debug!("{virt_copy_out_cmd_str}");
 
     let virt_copy_out_output = virt_copy_out_cmd.output().await?;
