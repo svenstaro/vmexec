@@ -1,5 +1,8 @@
+use std::path::Path;
+
 use clap::{CommandFactory, Parser, crate_name};
 use color_eyre::eyre::{Context, Result, bail};
+use qemu::convert_ovmf_uefi_variables;
 use tempfile::TempDir;
 use termion::{color, style};
 use tokio::fs::{self, read_to_string};
@@ -139,10 +142,14 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
         bail!("Somehow {image_path:?} didn't have a parent");
     };
 
+    let ovmf_vars_system_path = Path::new("/usr/share/edk2/x64/OVMF_VARS.4m.fd");
+    let ovmf_vars = convert_ovmf_uefi_variables(run_dir.path(), ovmf_vars_system_path).await?;
+
     let qemu_launch_opts = qemu::QemuLaunchOpts {
         volumes: run_args.volumes,
         published_ports: run_args.published_ports,
         image_path,
+        ovmf_uefi_vars_path: ovmf_vars,
         kernel_initrd,
         show_vm_window: run_args.show_vm_window,
         pubkey: ssh_keypair.pubkey_str,
