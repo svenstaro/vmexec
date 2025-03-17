@@ -257,6 +257,9 @@ pub async fn launch_qemu(
 
     let mut qemu_cmd = Command::new(tool_paths.qemu_path.clone());
     qemu_cmd
+        // Decrease idle CPU usage
+        .args(["-machine", "hpet=off"])
+
         .args(["-accel", "kvm"])
         .args(["-cpu", "host"])
         .args(["-smp", &logical_core_count.to_string()])
