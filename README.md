@@ -79,16 +79,6 @@ When running a VM or two, you can check the shared memory stats via
 
 which will print a few pretty stats for you.
 
-## Known issues
-
-vmexec does not currently do anything to mitigate guest page cache being unreclaimable.
-Possible solutions:
-- Convert rootfs to ext4 (because btrfs doesn't support DAX), see also [here](https://wiki.archlinux.org/title/QEMU#Using_virtio_pmem_to_bypass_the_guest's_page_cache).
-- Serve rootfs via virtiofsd which also seems to work to bypass the guest cache. This requires extracting the qcow2 file into a plain directory on the host and serving it like this:
-    `unshare -r --map-auto -- /usr/lib/virtiofsd --socket-path=/tmp/vhostqemu --shared-dir=rootlol --cache=never --allow-mmap --allow-direct-io --thread-pool-size 16`
-    we can then boot from it like this:
-    `-append "rootfstype=virtiofs root=lol rw" -chardev socket,id=char0,path=/tmp/vhostqemu -device vhost-user-fs-pci,queue-size=1024,chardev=char0,tag=lol`
-
 ## Other projects
 
 If you like this kind of stuff or if this doesn't exactly fit your needs, there are also these projects:
