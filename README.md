@@ -27,8 +27,9 @@ Nowadays, many are used to the convenience of container runners such as `podman`
 
 ## Requirements
 
-- [QEMU](https://www.qemu.org/)
+- [QEMU system emulator](https://www.qemu.org/)
 - [virtiofsd](https://gitlab.com/virtio-fs/virtiofsd)
+- [libguestfs](https://libguestfs.org/)
 
 ## How to run
 
