@@ -119,10 +119,10 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
         .wrap_err(format!("Couldn't make temp dir in {:?}", dirs.runs_dir))?;
     debug!("run dir is: {:?}", run_dir.path());
 
+    let lock_dir = dirs.cache_dir.join("lockdir");
+    trace!("Trying to lock {lock_dir:?}");
+    let lock = DirLock::new(&lock_dir).await?;
     let image_path = if let Some(os) = run_args.image_source.os {
-        let lock_dir = dirs.cache_dir.join("lockdir");
-        trace!("Trying to lock {lock_dir:?}");
-        let _ = DirLock::new(lock_dir).await?;
         match os {
             cli::OsType::Archlinux => {
                 ensure_archlinux_image(&dirs.cache_dir, run_args.pull).await?
@@ -133,6 +133,8 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
     } else {
         unreachable!();
     };
+    trace!("Unlocking {lock_dir:?}");
+    lock.drop_async().await?;
 
     let ssh_keypair = ensure_ssh_key(&dirs.secrets_dir).await?;
 

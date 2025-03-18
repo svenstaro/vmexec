@@ -108,7 +108,7 @@ pub async fn create_free_cid(runs_dir: &Path, run_dir: &Path) -> Result<u32> {
 
     let lock_dir = runs_dir.join("lockdir");
     trace!("Trying to lock {lock_dir:?}");
-    let _ = DirLock::new(lock_dir).await?;
+    let lock = DirLock::new(&lock_dir).await?;
 
     let mut entries = WalkDir::new(runs_dir).filter(|entry| async move {
         let filename = entry.file_name();
@@ -142,6 +142,10 @@ pub async fn create_free_cid(runs_dir: &Path, run_dir: &Path) -> Result<u32> {
 
     debug!("Our new CID: {cid}");
     fs::write(run_dir.join("cid"), cid.to_string()).await?;
+
+    trace!("Unlocking {lock_dir:?}");
+    lock.drop_async().await?;
+
     Ok(cid)
 }
 
