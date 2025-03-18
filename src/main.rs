@@ -2,12 +2,13 @@ use std::path::Path;
 
 use clap::{CommandFactory, Parser, crate_name};
 use color_eyre::eyre::{Context, Result, bail};
+use dir_lock::DirLock;
 use qemu::convert_ovmf_uefi_variables;
 use tempfile::TempDir;
 use termion::{color, style};
 use tokio::fs::{self, read_to_string};
 use tokio::process;
-use tracing::{Level, debug, instrument};
+use tracing::{Level, debug, instrument, trace};
 use utils::VmexecDirs;
 
 mod cli;
@@ -110,6 +111,8 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
 
     let dirs = VmexecDirs::new().await?;
 
+    // TODO reap dead run dirs here
+
     // Dir for this run (usually ~/.local/share/vmexec/runs/<random id>/)
     // Temporary and self-deleting so we don't end up with a lot of garbage after some time.
     let run_dir = TempDir::with_prefix_in("run", &dirs.runs_dir)
@@ -117,6 +120,9 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
     debug!("run dir is: {:?}", run_dir.path());
 
     let image_path = if let Some(os) = run_args.image_source.os {
+        let lock_dir = dirs.cache_dir.join("lockdir");
+        trace!("Trying to lock {lock_dir:?}");
+        let _ = DirLock::new(lock_dir).await?;
         match os {
             cli::OsType::Archlinux => {
                 ensure_archlinux_image(&dirs.cache_dir, run_args.pull).await?
