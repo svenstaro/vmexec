@@ -14,6 +14,7 @@ use color_eyre::eyre::{Context, OptionExt, Result, bail};
 use tokio::process::{Child, Command};
 use tracing::{debug, error, info, instrument, trace};
 
+use crate::cli::PmemMount;
 use crate::{
     cli::{BindMount, PublishPort},
     runner::CancellationTokens,
@@ -203,6 +204,7 @@ pub async fn launch_virtiofsd(
 #[derive(Debug, Clone)]
 pub struct QemuLaunchOpts {
     pub volumes: Vec<BindMount>,
+    pub pmems: Vec<PmemMount>,
     pub published_ports: Vec<PublishPort>,
     pub image_path: PathBuf,
     pub ovmf_uefi_vars_path: PathBuf,
@@ -255,6 +257,11 @@ pub async fn launch_qemu(
     let qmp_socket_path = run_dir.join("qmp.sock,server,wait=off");
     let qmp_socket_path_str = qmp_socket_path.to_string_lossy();
 
+    // In case we're using virtio pmem devices, we'll have to accumulate their memory and add it on
+    // top of the regular memory as `maxmem`.
+    let total_pmem_size = qemu_launch_opts.pmems.iter().fold(0, |acc, x| acc + x.size);
+    let qemu_maxmem = format!(",maxmem={}G", memory + total_pmem_size);
+
     let mut qemu_cmd = Command::new(tool_paths.qemu_path.clone());
     qemu_cmd
         // Decrease idle CPU usage
@@ -280,9 +287,9 @@ pub async fn launch_qemu(
         .args(["-device", "virtio-balloon,free-page-reporting=on"])
 
         // Memory configuration
-        .args(["-m", &format!("{memory}G")])
-        .args(["-object", &format!("memory-backend-memfd,id=mem,merge=on,size={memory}G,share=on")])
-        .args(["-numa", "node,memdev=mem"])
+        .args(["-m", &format!("{memory}G{qemu_maxmem}")])
+        .args(["-object", &format!("memory-backend-memfd,id=mem0,merge=on,share=on,size={memory}G")])
+        .args(["-numa", "node,memdev=mem0"])
 
         // UEFI
         .args([
@@ -309,12 +316,17 @@ pub async fn launch_qemu(
             ),
         ]);
 
+    // It's important we keep `virtiofsd_handles` in scope here and that we don't drop them too
+    // early as otherwise the process would exit and the VM would be unhappy.
     let mut virtiofsd_handles = vec![];
+
     if !qemu_launch_opts.is_warmup {
         qemu_cmd.arg("-snapshot");
 
-        // Directory sharing
+        // We need fstab entries for virtiofsd mounts and pmem devices.
         let mut fstab_entries = vec![];
+
+        // Add virtiofsd-based directory shares
         for (i, vol) in qemu_launch_opts.volumes.iter().enumerate() {
             let virtiofsd_child = launch_virtiofsd(&tool_paths.virtiofsd_path, run_dir, vol)
                 .await
@@ -341,6 +353,25 @@ pub async fn launch_qemu(
                     "-device",
                     &format!("vhost-user-fs-pci,chardev=char{i},tag={tag}"),
                 ]);
+        }
+
+        // Add virtio-pmem devices
+        for (i, pmem) in qemu_launch_opts.pmems.iter().enumerate() {
+            // Systemd will conveniently auto-format the device on mount, neat!
+            let fstab_entry = format!(
+                "/dev/pmem{i} {} ext4 rw,relatime,dax=always,x-systemd.makefs 0 0",
+                pmem.dest.to_string_lossy()
+            );
+            fstab_entries.push(fstab_entry);
+
+            let pmem_file = run_dir.join(format!("pmem{i}.pmem"));
+            qemu_cmd.args([
+                "-object",
+                &format!("memory-backend-file,id=pmem{i},share=on,merge=on,discard-data=on,mem-path={},size={}G", pmem_file.to_string_lossy(), pmem.size)]);
+            qemu_cmd.args([
+                "-device",
+                &format!("virtio-pmem-pci,memdev=pmem{i},id=nv{i}"),
+            ]);
         }
 
         if !fstab_entries.is_empty() {

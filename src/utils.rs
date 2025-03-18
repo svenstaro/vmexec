@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use async_walkdir::{Filtering, WalkDir};
+use bytesize::ByteSize;
 use color_eyre::Result;
 use color_eyre::eyre::{Context, OptionExt, bail};
 use dir_lock::DirLock;
@@ -212,8 +213,7 @@ pub async fn print_ksm_stats() -> Result<()> {
     let pages_sharing = fs::read_to_string("/sys/kernel/mm/ksm/pages_sharing").await?;
     let full_scans = fs::read_to_string("/sys/kernel/mm/ksm/full_scans").await?;
     let general_profit = fs::read_to_string("/sys/kernel/mm/ksm/general_profit").await?;
-    let general_profit_human =
-        humansize::format_size(general_profit.trim().parse::<u64>()?, humansize::BINARY);
+    let general_profit_human = ByteSize::b(general_profit.trim().parse::<u64>()?);
 
     println!(
         "Pages scanned: {}{}{:>10}{}{}",

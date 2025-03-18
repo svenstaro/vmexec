@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## [Unreleased] - ReleaseDate
 - Add some flags to `virtiofsd` call to improve performance and decrease guest memory usage
 - Fix multiple `-v` options not working due to incorrect fstab getting generated
+- Add virtio-pmem device support with `--pmem`
 
 ## [0.1.1] - 2025-03-13
 - Fix NvVars file getting created in mounted dirs

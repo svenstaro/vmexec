@@ -147,6 +147,7 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
 
     let qemu_launch_opts = qemu::QemuLaunchOpts {
         volumes: run_args.volumes,
+        pmems: run_args.pmems,
         published_ports: run_args.published_ports,
         image_path,
         ovmf_uefi_vars_path: ovmf_vars,

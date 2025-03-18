@@ -39,13 +39,6 @@ fn parse_seconds_to_duration(src: &str) -> Result<Duration, String> {
     Ok(Duration::from_secs(sec_int))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BindMount {
-    pub source: PathBuf,
-    pub dest: PathBuf,
-    pub read_only: bool,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublishPort {
     pub host_ip: Ipv4Addr,
@@ -113,7 +106,15 @@ impl FromStr for PublishPort {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindMount {
+    pub source: PathBuf,
+    pub dest: PathBuf,
+    pub read_only: bool,
+}
+
 impl BindMount {
+    /// Safely printable/escaped path
     pub fn tag(&self) -> String {
         escape_path(&self.dest.to_string_lossy())
     }
@@ -177,6 +178,36 @@ impl FromStr for BindMount {
             dest,
             read_only: false,
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmemMount {
+    pub dest: PathBuf,
+    pub size: u64,
+}
+
+impl FromStr for PmemMount {
+    type Err = String;
+
+    fn from_str(src: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = src.split(':').collect();
+        if parts.len() != 2 {
+            return Err("Expected format: dest:<size>".to_string());
+        }
+
+        let dest = PathBuf::from(parts[0]);
+        if !dest.is_absolute() {
+            return Err("dest must be an absolute path".to_string());
+        }
+
+        let size = if let Ok(size) = parts[1].parse() {
+            size
+        } else {
+            return Err("Couldn't parse size as integer".to_string());
+        };
+
+        Ok(PmemMount { dest, size })
     }
 }
 
@@ -246,8 +277,27 @@ pub struct RunCommand {
     /// Expected format: source:dest[:ro]
     ///
     /// `ro` can optionally be provided to mark the mount as read-only.
+    ///
+    /// Example: $PWD/src:/mnt:ro
     #[arg(short, long = "volume", value_parser(BindMount::from_str))]
     pub volumes: Vec<BindMount>,
+
+    /// Mount a virtio-pmem device file into the virtual machine
+    ///
+    /// You might want to do this to bypass the guest page cache. This is important if you're
+    /// overprovisioning your host (i.e. giving VMs more combined memory than the host actually
+    /// has) and have a write-heavy workload.
+    /// For more info, see: https://www.qemu.org/docs/master/system/devices/virtio-pmem.html
+    ///
+    /// Can be provided multiple times.
+    ///
+    /// Size is in gigabytes.
+    ///
+    /// Expected format: dest:<size>
+    ///
+    /// Example: /var/lib:20
+    #[arg(long = "pmem", value_parser(PmemMount::from_str))]
+    pub pmems: Vec<PmemMount>,
 
     /// Publish a port on the virtual machine to the host
     ///
@@ -383,6 +433,22 @@ mod tests {
     #[case("/tmp:/tmp:something", "Expected format: source:dest[:ro]")]
     fn test_parse_bind_volume_invalid(#[case] input: &str, #[case] expected: &str) {
         let actual = BindMount::from_str(input).unwrap_err();
+        assert_eq!(actual, expected);
+    }
+
+    #[rstest]
+    #[case("/tmp:2", "/tmp", 2)]
+    #[case("/tmp:200", "/tmp", 200)]
+    fn test_parse_pmem_valid(#[case] input: &str, #[case] dest: PathBuf, #[case] size: u64) {
+        let actual = PmemMount::from_str(input).unwrap();
+        let expected = PmemMount { dest, size };
+        assert_eq!(actual, expected);
+    }
+
+    #[rstest]
+    #[case("tmp:2", "dest must be an absolute path")]
+    fn test_parse_pmem_invalid(#[case] input: &str, #[case] expected: &str) {
+        let actual = PmemMount::from_str(input).unwrap_err();
         assert_eq!(actual, expected);
     }
 
