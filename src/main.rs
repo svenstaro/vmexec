@@ -26,6 +26,9 @@ use crate::utils::{
 };
 use crate::vm_images::ensure_archlinux_image;
 
+// What we'll prefix every run tmpdir with
+pub const RUN_DIR_PREFIX: &str = "run";
+
 fn install_tracing(log_level: Level) {
     use tracing_error::ErrorLayer;
     use tracing_subscriber::prelude::*;
@@ -120,7 +123,7 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
 
     // Dir for this run (usually ~/.local/share/vmexec/runs/<random id>/)
     // Temporary and self-deleting so we don't end up with a lot of garbage after some time.
-    let run_dir = TempDir::with_prefix_in("run", &dirs.runs_dir)
+    let run_dir = TempDir::with_prefix_in(RUN_DIR_PREFIX, &dirs.runs_dir)
         .wrap_err(format!("Couldn't make temp dir in {:?}", dirs.runs_dir))?;
     debug!("run dir is: {:?}", run_dir.path());
 

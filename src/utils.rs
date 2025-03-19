@@ -14,6 +14,8 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tracing::{debug, info, instrument, trace, warn};
 
+use crate::RUN_DIR_PREFIX;
+
 /// Ensure that a required directory exists
 pub async fn ensure_directory(purpose: &str, path: &Path) -> Result<()> {
     if !path.exists() {
@@ -277,8 +279,9 @@ pub async fn reap_dead_run_dirs(runs_dir: &Path) -> Result<()> {
 
     while let Some(entry) = entries.next_entry().await? {
         let dir = entry.path();
+        let dir_name = entry.file_name();
 
-        if dir.is_dir() {
+        if dir.is_dir() && dir_name.to_string_lossy().starts_with(RUN_DIR_PREFIX) {
             debug!("Found existing run dir {dir:?}, seeing if we need to clean up");
             let pid_path = dir.join("qemu.pid");
 
