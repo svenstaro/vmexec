@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+## [0.1.3] - 2025-03-19
 - Add dead run dir reaping
 - Add locking when pulling images
 
@@ -23,7 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - First somewhat working version
 
 <!-- next-url -->
-[Unreleased]: https://github.com/svenstaro/vmexec/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/svenstaro/vmexec/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/svenstaro/vmexec/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/svenstaro/vmexec/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/svenstaro/vmexec/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/svenstaro/dummyhttp/compare/v0.1.0...v0.1.0

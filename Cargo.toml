@@ -1,6 +1,6 @@
 [package]
 name = "vmexec"
-version = "0.1.2"
+version = "0.1.3"
 description = "Run a single command in a speedy virtual machine with zero-setup"
 authors = ["Sven-Hendrik Haase <sven@svenstaro.org>"]
 repository = "https://github.com/svenstaro/vmexec"
