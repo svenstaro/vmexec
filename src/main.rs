@@ -21,7 +21,9 @@ mod vm_images;
 use crate::cli::{Command, KsmCommand, RunCommand};
 use crate::qemu::KernelInitrd;
 use crate::ssh::ensure_ssh_key;
-use crate::utils::{check_ksm_active, create_free_cid, find_required_tools, print_ksm_stats};
+use crate::utils::{
+    check_ksm_active, create_free_cid, find_required_tools, print_ksm_stats, reap_dead_run_dirs,
+};
 use crate::vm_images::ensure_archlinux_image;
 
 fn install_tracing(log_level: Level) {
@@ -111,7 +113,10 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
 
     let dirs = VmexecDirs::new().await?;
 
-    // TODO reap dead run dirs here
+    let lock_dir = dirs.cache_dir.join("lockdir");
+    trace!("Trying to lock {lock_dir:?}");
+
+    reap_dead_run_dirs(&dirs.runs_dir).await?;
 
     // Dir for this run (usually ~/.local/share/vmexec/runs/<random id>/)
     // Temporary and self-deleting so we don't end up with a lot of garbage after some time.
@@ -119,8 +124,6 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
         .wrap_err(format!("Couldn't make temp dir in {:?}", dirs.runs_dir))?;
     debug!("run dir is: {:?}", run_dir.path());
 
-    let lock_dir = dirs.cache_dir.join("lockdir");
-    trace!("Trying to lock {lock_dir:?}");
     let lock = DirLock::new(&lock_dir).await?;
     let image_path = if let Some(os) = run_args.image_source.os {
         match os {

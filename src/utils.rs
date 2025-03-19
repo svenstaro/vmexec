@@ -7,10 +7,12 @@ use color_eyre::eyre::{Context, OptionExt, bail};
 use dir_lock::DirLock;
 use directories::ProjectDirs;
 use futures::StreamExt;
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate};
 use termion::{color, style};
-use tokio::fs::{self, create_dir_all, read_to_string};
+use tokio::fs::{self, File, create_dir_all, read_to_string};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 /// Ensure that a required directory exists
 pub async fn ensure_directory(purpose: &str, path: &Path) -> Result<()> {
@@ -251,6 +253,73 @@ pub async fn print_ksm_stats() -> Result<()> {
         color::Fg(color::Reset),
         style::Reset,
     );
+
+    Ok(())
+}
+
+/// Check whether the given `pid` is currently an active process
+fn pid_exists(pid: usize) -> bool {
+    let mut system = sysinfo::System::default();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid.into()]),
+        true,
+        ProcessRefreshKind::default(),
+    ) > 0
+}
+
+/// Reap dead runs that didn't get cleaned up
+///
+/// This can happen is vmexec is killed at a bad moment and doesn't have the opportunity to clean
+/// up stuff.
+#[instrument]
+pub async fn reap_dead_run_dirs(runs_dir: &Path) -> Result<()> {
+    let mut entries = fs::read_dir(runs_dir).await?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let dir = entry.path();
+
+        if dir.is_dir() {
+            debug!("Found existing run dir {dir:?}, seeing if we need to clean up");
+            let pid_path = dir.join("qemu.pid");
+
+            // Determine if `qemu.pid` exists and try to read its content.
+            match File::open(&pid_path).await {
+                Ok(mut file) => {
+                    let mut pid_str = String::new();
+                    file.read_to_string(&mut pid_str)
+                        .await
+                        .context(format!("Failed to read {pid_path:?}"))?;
+
+                    // Try to parse the pid into usize.
+                    if let Ok(pid) = pid_str.trim().parse::<usize>() {
+                        if !pid_exists(pid) {
+                            // If no process with that pid exists, remove the directory
+                            info!("Found dead run dir {dir:?}, cleaning up");
+                            fs::remove_dir_all(&dir)
+                                .await
+                                .context("Failed to remove dead run dir")?;
+                        }
+                    } else {
+                        // Remove the directory if `qemu.pid` is present but invalid.
+                        info!("Found run dir {dir:?} with invalid qemu.pid file, cleaning up");
+                        fs::remove_dir_all(&dir)
+                            .await
+                            .context("Failed to remove dead run dir")?;
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    // If `qemu.pid` does not exist, remove the directory.
+                    info!("Found run dir {dir:?} without qemu.pid file, cleaning up");
+                    fs::remove_dir_all(&dir)
+                        .await
+                        .context("Failed to remove dead run dir")?;
+                }
+                Err(e) => {
+                    bail!(e);
+                }
+            }
+        }
+    }
 
     Ok(())
 }

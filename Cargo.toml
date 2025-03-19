@@ -36,7 +36,7 @@ rattler_digest = { version = "1.0.5", features = ["tokio"] }
 reqwest = "0.12.12"
 russh = "0.50"
 shell-escape = "0.1.5"
-sysinfo = "0.33.0"
+sysinfo = { version = "0.33.0", default-features = false, features = ["system"] }
 tempfile = "3.17.0"
 termion = "4.0.3"
 tokio = { version = "1.42.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread"] }

@@ -11,6 +11,7 @@ use std::{
 
 use base64ct::{Base64, Encoding};
 use color_eyre::eyre::{Context, OptionExt, Result, bail};
+use tokio::fs;
 use tokio::process::{Child, Command};
 use tracing::{debug, error, info, instrument, trace};
 
@@ -398,6 +399,17 @@ pub async fn launch_qemu(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
+
+    // Write QEMU's pid into a `qemu-pid` file in the run dir. This allows a cleanup job to run and
+    // some point and remove all the run dirs that have a dead QEMU (which can happen if vmexec is
+    // cancelled at the wrong time).
+    let qemu_pid_path = run_dir.join("qemu.pid");
+    let qemu_pid = qemu_child
+        .id()
+        .ok_or_eyre("QEMU has no pid, maybe it exited early?")?
+        .to_string();
+    fs::write(&qemu_pid_path, &qemu_pid).await?;
+    trace!("Writing QEMU pid {qemu_pid} to {qemu_pid_path:?}");
 
     let qemu_output = tokio::select! {
         _ = cancellation_tokens.qemu.cancelled() => {

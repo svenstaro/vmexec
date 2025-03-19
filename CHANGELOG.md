@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+- Add dead run dir reaping
 - Add locking when pulling images
 
 ## [0.1.2] - 2025-03-18
