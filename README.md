@@ -15,12 +15,13 @@ Nowadays, many are used to the convenience of container runners such as `podman`
 
 ## Features
 
-- It has a `docker run`-inspired interface that many should already be familiar with.
+- `docker run`-inspired interface that many should already be familiar with
 - Environment variables (`-e/--env`)
 - Volume mounting (`-v/--volume`)
 - Port forwarding (`-p/--publish`)
 - Automatic image pulling (`--pull`)
-- Does the right things automatically for maximum performance (sane CPU, memory, and device settings such as virtio drivers)
+- Does the right things automatically for maximum performance (sane CPU, memory, and device settings such as virtio drivers, terminal input handling)
+- Memory free page reporting so that the host can easily reclaim free memory from the guest (best coupled with `--pmem` to bypass the guest page cache entirely)
 - Image warmup phase with after-first-boot snapshotting for quick VM boot times (usually less than 5s)
 - Doesn't need libvirt, uses QEMU directly
 - Uses [vsock](https://man7.org/linux/man-pages/man7/vsock.7.html) for efficient and secure local transport
@@ -44,19 +45,31 @@ runs will use this snapshot which will result in quick follow-up commands.
 
 ### Run an interactive command
 
-    vmexec run --os archlinux -- bash
+    vmexec run archlinux -- bash
 
 ### Set an environment variable
 
-    vmexec run --os archlinux -e HELLO=yeshello -- bash -c '$HELLO'
+    vmexec run archlinux -e HELLO=yeshello -- bash -c '$HELLO'
 
 ### Bind a directory from the host
 
-    vmexec run --os archlinux -v $PWD/hostdir:/mnt -- ls -lha /mnt
+    vmexec run archlinux -v $PWD/hostdir:/mnt -- ls -lha /mnt
+
+### Mount a virtio-pmem device
+
+A virtio-pmem device will allow the OS inside the VM to bypass its page cache
+and use the host's page cache directly.
+This allows for more efficient RAM usage as and page cache used by the guest
+will be unavailable to the host and can't be reclaimed.
+
+    vmexec run archlinux --pmem /mnt:50 -- ls -lha /mnt
+
+This command will create a temporary sparse file on the host.
+During VM boot, it's automatically formatted and mounted.
 
 ### Forward a port from the VM to the host
 
-    vmexec run --os archlinux -p 8080:80 -- nc -l -p 80
+    vmexec run archlinux -p 8080:80 -- nc -l -p 80
 
 ## Kernel Samepage Merging (KSM)
 
