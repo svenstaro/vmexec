@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - ReleaseDate
 - Remove `--image` and `--os` flags as this is now merged into a new positional argument
+- Add `-i/--interactive` and `-t/-tty` flags for more control over the terminal
 
 ## [0.1.3] - 2025-03-19
 - Add dead run dir reaping

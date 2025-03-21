@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::path::Path;
 
 use clap::{CommandFactory, Parser, crate_name};
@@ -169,8 +170,24 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
         is_warmup: true,
     };
 
+    let tty = match run_args.tty {
+        cli::Tty::Always => true,
+        cli::Tty::Never => false,
+        cli::Tty::Auto => std::io::stdin().is_terminal(),
+    };
+
+    let interactive = match run_args.interactive {
+        cli::Interactive::Always => true,
+        cli::Interactive::Never => false,
+        cli::Interactive::Auto => std::io::stdin().is_terminal(),
+    };
+
+    debug!("tty: {tty}, interactive: {interactive}");
+
     let ssh_launch_opts = ssh::SshLaunchOpts {
         timeout: run_args.ssh_timeout,
+        tty,
+        interactive,
         env_vars: run_args.env,
         args: run_args.args,
         privkey: ssh_keypair.privkey_str,

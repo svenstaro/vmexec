@@ -11,6 +11,20 @@ pub enum OsType {
     Archlinux,
 }
 
+#[derive(Debug, Clone, ValueEnum)]
+pub enum Interactive {
+    Always,
+    Never,
+    Auto,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum Tty {
+    Always,
+    Never,
+    Auto,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum OsTypeOrImagePath {
     OsType(OsType),
@@ -35,7 +49,7 @@ impl FromStr for OsTypeOrImagePath {
         let mut err = format!("Could not parse '{src}' as OS type or as an existing file path\n");
         let os_types = format!("{:?}", OsType::value_variants());
         err.push_str(&format!("Valid OS types are: {}", os_types.to_lowercase()));
-        return Err(err);
+        Err(err)
     }
 }
 
@@ -291,7 +305,7 @@ pub struct RunCommand {
     /// Can be provided multiple times.
     ///
     /// Expected format: KEY=VALUE
-    #[arg(short, long, value_parser(EnvVar::from_str))]
+    #[arg(short, long, value_parser = EnvVar::from_str)]
     pub env: Vec<EnvVar>,
 
     /// Bind mount a volume into the virtual machine
@@ -303,7 +317,7 @@ pub struct RunCommand {
     /// `ro` can optionally be provided to mark the mount as read-only.
     ///
     /// Example: $PWD/src:/mnt:ro
-    #[arg(short, long = "volume", value_parser(BindMount::from_str))]
+    #[arg(short, long = "volume", value_parser= BindMount::from_str)]
     pub volumes: Vec<BindMount>,
 
     /// Mount a virtio-pmem device file into the virtual machine
@@ -320,7 +334,7 @@ pub struct RunCommand {
     /// Expected format: dest:<size>
     ///
     /// Example: /var/lib:20
-    #[arg(long = "pmem", value_parser(PmemMount::from_str))]
+    #[arg(long = "pmem", value_parser = PmemMount::from_str)]
     pub pmems: Vec<PmemMount>,
 
     /// Publish a port on the virtual machine to the host
@@ -335,7 +349,7 @@ pub struct RunCommand {
     /// host port.
     ///
     /// Currently only IPv4 is supported for `hostip`.
-    #[arg(short, long = "publish", value_parser(PublishPort::from_str))]
+    #[arg(short, long = "publish", value_parser = PublishPort::from_str)]
     pub published_ports: Vec<PublishPort>,
 
     /// SSH connection timeout
@@ -345,9 +359,21 @@ pub struct RunCommand {
         short,
         long,
         default_value = "20",
-        value_parser(parse_seconds_to_duration)
+        value_parser = parse_seconds_to_duration,
     )]
     pub ssh_timeout: Duration,
+
+    /// Make STDIN available to the virtual machine's process
+    ///
+    /// If 'auto', this will be enabled in case vmexec is run from an interactive terminal.
+    #[arg(short, long, default_value = "auto")]
+    pub interactive: Interactive,
+
+    /// Allocate a pseudo-TTY for the virtual machine
+    ///
+    /// If 'auto', this will be enabled in case vmexec is run from an interactive terminal.
+    #[arg(short, long, default_value = "auto")]
+    pub tty: Tty,
 
     /// Show a window with the virtual machine running in it
     ///

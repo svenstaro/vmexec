@@ -49,6 +49,8 @@ impl PersistedSshKeypair {
 #[derive(Clone, Debug)]
 pub struct SshLaunchOpts {
     pub privkey: String,
+    pub tty: bool,
+    pub interactive: bool,
     pub timeout: Duration,
     pub env_vars: Vec<EnvVar>,
     pub args: Vec<String>,
@@ -222,21 +224,23 @@ impl Session {
     }
 
     #[instrument(skip(self))]
-    async fn call(&mut self, env: Vec<EnvVar>, command: &str) -> Result<u32> {
+    async fn call(&mut self, interactive: bool, env: Vec<EnvVar>, command: &str) -> Result<u32> {
         let mut channel = self.session.channel_open_session().await?;
 
-        // Request an interactive PTY from the server
-        channel
-            .request_pty(
-                true,
-                &env::var("TERM").unwrap_or("xterm-256color".into()),
-                self.terminal_size.0 as u32,
-                self.terminal_size.1 as u32,
-                0,
-                0,
-                &[], // ideally you want to pass the actual terminal modes here
-            )
-            .await?;
+        if interactive {
+            // Request an interactive PTY from the server
+            channel
+                .request_pty(
+                    true,
+                    &env::var("TERM").unwrap_or("xterm-256color".into()),
+                    self.terminal_size.0 as u32,
+                    self.terminal_size.1 as u32,
+                    0,
+                    0,
+                    &[], // ideally you want to pass the actual terminal modes here
+                )
+                .await?;
+        }
 
         for e in env {
             channel.set_env(true, e.key, e.value).await?;
@@ -250,6 +254,10 @@ impl Session {
         let mut stdout = tokio_fd::AsyncFd::try_from(libc::STDOUT_FILENO)?;
         let mut buf = vec![0; 1024];
         let mut stdin_closed = false;
+
+        // TODO maybe have entirely separate code paths for interactive vs non-interactive?
+        // We don't need to handle terminal resizing and stdin at all if we have no tty and are not
+        // interactive.
 
         loop {
             // Handle one of the possible events:
@@ -326,13 +334,18 @@ pub async fn connect_ssh_interactive(
 
     let code = {
         // We're using `termion` to put the terminal into raw mode, so that we can
-        // display the output of interactive applications correctly
-        let _raw_term = std::io::stdout().into_raw_mode()?;
+        // display the output of interactive applications correctly.
+        let _raw_term = if ssh_launch_opts.tty {
+            Some(std::io::stdout().into_raw_mode()?)
+        } else {
+            None
+        };
 
         let escaped_args = &ssh_launch_opts
             .args
             .into_iter()
-            .map(|x| shell_escape::escape(x.into())) // arguments are escaped manually since the SSH protocol doesn't support quoting
+            // arguments are escaped manually since the SSH protocol doesn't support quoting
+            .map(|x| shell_escape::escape(x.into()))
             .collect::<Vec<_>>()
             .join(" ");
         let ssh_output = tokio::select! {
@@ -340,7 +353,7 @@ pub async fn connect_ssh_interactive(
                 debug!("SSH task was cancelled");
                 return Ok(())
             }
-            val = ssh.call(ssh_launch_opts.env_vars, escaped_args) => {
+            val = ssh.call(ssh_launch_opts.interactive, ssh_launch_opts.env_vars, escaped_args) => {
                 val
             }
         };
@@ -374,21 +387,21 @@ pub async fn connect_ssh_for_warmup(
 
     // First we'll wait until the system has fully booted up.
     let is_running_exitcode = ssh
-        .call(vec![], "systemctl is-system-running --wait --quiet")
+        .call(false, vec![], "systemctl is-system-running --wait --quiet")
         .await?;
     debug!("systemctl is-system-running --wait exit code {is_running_exitcode}");
 
     // TODO: Here we'll add a stupid hack to deal with
     // https://github.com/linux-pam/linux-pam/issues/885 for the time being.
-    ssh.call(vec![], "echo 127.0.0.1 unknown >> /etc/hosts")
+    ssh.call(false, vec![], "echo 127.0.0.1 unknown >> /etc/hosts")
         .await?;
 
     // Allow the --env option to work by allowing SSH to accept all sent environment variables.
-    ssh.call(vec![], "echo AcceptEnv * >> /etc/ssh/sshd_config")
+    ssh.call(false, vec![], "echo AcceptEnv * >> /etc/ssh/sshd_config")
         .await?;
 
     // Then shut the system down.
-    ssh.call(vec![], "systemctl poweroff").await?;
+    ssh.call(false, vec![], "systemctl poweroff").await?;
     debug!("Shutting down system");
 
     // Tell the QEMU handler it's now fine to wait for exit.
