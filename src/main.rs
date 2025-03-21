@@ -18,7 +18,7 @@ mod ssh;
 mod utils;
 mod vm_images;
 
-use crate::cli::{Command, KsmCommand, RunCommand};
+use crate::cli::{Command, KsmCommand, OsTypeOrImagePath, RunCommand};
 use crate::qemu::KernelInitrd;
 use crate::ssh::ensure_ssh_key;
 use crate::utils::{
@@ -128,16 +128,13 @@ async fn run_command(run_args: RunCommand) -> Result<()> {
     debug!("run dir is: {:?}", run_dir.path());
 
     let lock = DirLock::new(&lock_dir).await?;
-    let image_path = if let Some(os) = run_args.image_source.os {
-        match os {
+    let image_path = match run_args.image_source {
+        OsTypeOrImagePath::OsType(os_type) => match os_type {
             cli::OsType::Archlinux => {
                 ensure_archlinux_image(&dirs.cache_dir, run_args.pull).await?
             }
-        }
-    } else if let Some(image_path) = run_args.image_source.image {
-        image_path
-    } else {
-        unreachable!();
+        },
+        OsTypeOrImagePath::ImagePath(image_path) => image_path,
     };
     trace!("Unlocking {lock_dir:?}");
     lock.drop_async().await?;

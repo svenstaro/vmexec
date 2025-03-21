@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+- Remove `--image` and `--os` flags as this is now merged into a new positional argument
 
 ## [0.1.3] - 2025-03-19
 - Add dead run dir reaping

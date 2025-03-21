@@ -6,20 +6,47 @@ use tracing::Level;
 use crate::utils::escape_path;
 
 /// The operating system to run
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, PartialEq, ValueEnum)]
 pub enum OsType {
     Archlinux,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OsTypeOrImagePath {
+    OsType(OsType),
+    ImagePath(PathBuf),
+}
+
+impl FromStr for OsTypeOrImagePath {
+    type Err = String;
+
+    fn from_str(src: &str) -> Result<Self, Self::Err> {
+        // First we'll try to parse the input as a known OS.
+        if let Ok(os_type) = OsType::from_str(src, true) {
+            return Ok(Self::OsType(os_type));
+        } else {
+            // If we get here we'll try to parse the input as a path to a file (which is hopefully
+            // a valid VM image).
+            let path = PathBuf::from(src);
+            if path.is_file() {
+                return Ok(Self::ImagePath(path));
+            }
+        }
+        let mut err = format!("Could not parse '{src}' as OS type or as an existing file path\n");
+        let os_types = format!("{:?}", OsType::value_variants());
+        err.push_str(&format!("Valid OS types are: {}", os_types.to_lowercase()));
+        return Err(err);
+    }
 }
 
 #[derive(Debug, Clone, Args)]
 #[group(required = true, multiple = false)]
 pub struct ImageSource {
     /// Operating system to run
-    #[arg(short, long)]
     pub os: Option<OsType>,
 
     /// Path to an image
-    #[arg(short, long, value_parser = parse_existing_pathbuf)]
+    #[arg(value_parser = parse_existing_pathbuf)]
     pub image: Option<PathBuf>,
 }
 
@@ -259,9 +286,6 @@ pub enum Command {
 
 #[derive(Debug, Clone, Args)]
 pub struct RunCommand {
-    #[command(flatten)]
-    pub image_source: ImageSource,
-
     /// Set environment variables for the process inside the virtual machine
     ///
     /// Can be provided multiple times.
@@ -335,6 +359,12 @@ pub struct RunCommand {
     #[arg(long, default_value = "missing")]
     pub pull: Pull,
 
+    /// Either an operating system (e.g. archlinux) or a path to an image
+    ///
+    /// Possible OS types: archlinux
+    #[arg(value_parser = OsTypeOrImagePath::from_str)]
+    pub image_source: OsTypeOrImagePath,
+
     /// Arguments to run in the virtual machine
     pub args: Vec<String>,
 }
@@ -374,6 +404,21 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
+
+    #[rstest]
+    #[case("archlinux", OsTypeOrImagePath::OsType(OsType::Archlinux))]
+    #[case(env!("CARGO_MANIFEST_PATH"), OsTypeOrImagePath::ImagePath(PathBuf::from(env!("CARGO_MANIFEST_PATH"))))]
+    fn test_parse_os_type_or_image_path(#[case] input: &str, #[case] expected: OsTypeOrImagePath) {
+        let actual = OsTypeOrImagePath::from_str(input).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[rstest]
+    #[case("just something", "Could not parse")]
+    fn test_parse_os_type_or_image_path_invalid(#[case] input: &str, #[case] expected: &str) {
+        let actual = OsTypeOrImagePath::from_str(input).unwrap_err();
+        assert!(actual.starts_with(expected));
+    }
 
     #[rstest]
     #[case("127.0.0.1:8080:80", "127.0.0.1", "8080", "80")]
