@@ -1,9 +1,11 @@
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, atomic::AtomicBool},
+    time::Duration,
 };
 
 use color_eyre::eyre::{Context, Result};
+use indicatif::{ProgressBar, ProgressStyle};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument};
@@ -52,10 +54,27 @@ pub async fn run_warmup(
         }
     }
 
+    let progress = ProgressBar::new_spinner();
+    progress.set_style(
+        ProgressStyle::with_template("{spinner:.blue} {msg}")?.tick_strings(&[
+            "▹▹▹▹▹",
+            "▸▹▹▹▹",
+            "▹▸▹▹▹",
+            "▹▹▸▹▹",
+            "▹▹▹▸▹",
+            "▹▹▹▹▸",
+            "▪▪▪▪▪",
+        ]),
+    );
+    progress.enable_steady_tick(Duration::from_millis(100));
+    progress.set_message("Warming up image");
+
+    progress.println("Extracting kernel image");
     extract_kernel(&tool_paths.virt_copy_out_path, &qemu_launch_opts.image_path).await?;
 
     info!("No existing overlay image found, creating...");
 
+    progress.println("Creating overlay image");
     create_overlay_image(&qemu_launch_opts.image_path, &overlay_image_path).await?;
 
     // Create a new launch struct where we use the overlay image instead of the source image.
@@ -69,6 +88,7 @@ pub async fn run_warmup(
     // These channels allow us to signal that.
     let qemu_should_exit = Arc::new(AtomicBool::new(false));
 
+    progress.println("Running virtual machine");
     let cancellatation_tokens = CancellationTokens::default();
     let mut joinset = JoinSet::new();
     joinset.spawn({
@@ -93,6 +113,8 @@ pub async fn run_warmup(
     while let Some(res) = joinset.join_next().await {
         res??
     }
+
+    progress.finish_with_message("Image is warmed up");
 
     Ok(overlay_image_path)
 }
