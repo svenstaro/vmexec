@@ -34,9 +34,9 @@ indicatif = "0.17.11"
 libc = { version = "0.2.169", default-features = false }
 rattler_digest = { version = "1.0.5", features = ["tokio"] }
 reqwest = "0.12.12"
-russh = "0.50"
+russh = "0.51"
 shell-escape = "0.1.5"
-sysinfo = { version = "0.33.0", default-features = false, features = ["system"] }
+sysinfo = { version = "0.34", default-features = false, features = ["system"] }
 tempfile = "3.17.0"
 termion = "4.0.3"
 tokio = { version = "1.42.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread"] }
@@ -53,4 +53,4 @@ whoami = { version = "1.5.2", default-features = false }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
-rstest = "0.24.0"
+rstest = "0.25"
