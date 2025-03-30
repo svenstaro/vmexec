@@ -9,7 +9,7 @@
 **Run a single command in a speedy virtual machine with zero-setup**
 
 **vmexec** is a zero-setup CLI tool that runs single commands in a throwaway virtual machines.
-The idea is for you to run a command a command in VM without having think about the performance implications, how to mount files, how to forward ports, etc.
+The idea is for you to run a command in VM without having think about the performance implications, how to mount files, how to forward ports, etc.
 
 Nowadays, many are used to the convenience of container runners such as `podman` or `docker` but so far it hasn't been as covenient to run a VM, often requiring a manual set up step.
 
@@ -36,7 +36,7 @@ Nowadays, many are used to the convenience of container runners such as `podman`
 
 ### Run a basic command
 
-    vmexec run --os archlinux -- echo hello from inside VM
+    vmexec run archlinux -- echo hello from inside VM
 
 This will take a long time the first time because it will download the Arch
 Linux image and then warm it up by booting it, waiting until the first-boot
