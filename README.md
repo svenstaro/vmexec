@@ -101,6 +101,7 @@ If you like this kind of stuff or if this doesn't exactly fit your needs, there 
 - [katacontainers](https://katacontainers.io/)
 - [VmChamp](https://github.com/wubbl0rz/VmChamp)
 - [lima](https://github.com/lima-vm/lima)
+- [crosvm](https://github.com/google/crosvm)
 
 ## Releasing
 
