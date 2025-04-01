@@ -38,7 +38,7 @@ russh = "0.51"
 shell-escape = "0.1.5"
 sysinfo = { version = "0.34", default-features = false, features = ["system"] }
 tempfile = "3.17.0"
-termion = "4.0.3"
+termion = "4.0.5"
 tokio = { version = "1.42.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread"] }
 tokio-fd = "0.3.0"
 tokio-util = "0.7.13"
